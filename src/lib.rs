@@ -42,10 +42,152 @@ pub mod imp {
         fn map_of_param(self, _: impl FnMut(Self::Item) -> T) -> Self::Output;
     }
 
+    macro_rules! impl_for_tuple {
+        (@wrap_f $fn:ident[] [] [$($_:expr),*] {$($out:expr),*}) => {($($out,)*)};
+        // (@wrap_f [] [$_:ident] [$rhs:expr$(,$__:expr)*] {$($out:expr),*}) => {
+        //     impl_for_tuple!(@wrap_f [] [] [] {$($out,)*})
+        // };
+        (@wrap_f $fn:ident[] [$_:ident$(,$params1:ident)*] [$rhs:expr $(,$t:expr)*] {$($out:expr),*}) => {
+            impl_for_tuple!(@wrap_f $fn[] [$($params1),*] [$($t),*] {$($out,)*$rhs})
+        };
+        (@wrap_f $fn:ident[] $param:ident [$($params1:ident),*] [$rhs:expr $(,$t:expr)*] {$($out:expr),*}) => {
+            impl_for_tuple!(@wrap_f $fn[] [$($params1),*] [$($t),*] {$($out,)*($fn($rhs))})
+        };
+        (@wrap_f $fn:ident[$_:ident $(,$params0:ident)*] $param:ident [$($params1:ident),*] [$rhs:expr $(,$t:expr)*] {$($out:expr),*} ) => {
+            impl_for_tuple!(@wrap_f $fn[$($params0),*] $param [$($params1),*] [$($t),*] {$($out,)*$rhs})
+        };
+        (@nth [] [$rhs:expr$(,$_:expr)*]) => { $rhs };
+        (@nth [$_:expr $(,$lhs:expr)*] [$__:expr $(,$rhs:expr)*]) => {
+            impl_for_tuple!(@nth [$($lhs),*] [$($rhs),*])
+        };
+        (@count) => {0usize};
+        (@count $_:ident $(,$t:ident)*) => {
+            impl_for_tuple!(@count $($t),*) + 1
+        };
+        (
+            [$($params0:ident),*] $param:ident [$($params1:ident),*]
+        ) => {
+            impl<$($params0,)* $param $(,$params1)*>
+                IntoIteratorOfNthArgument<{impl_for_tuple!(@count $($params0),*)}>
+            for ($($params0,)* $param, $($params1),*) {
+                type Item = $param;
+                type IntoIter = std::iter::Once<$param>;
+                const MIN_LEN: usize = 1;
+                const MAX_LEN: Option<usize> = Some(1);
+                fn into_iter_of_arg(self) -> Self::IntoIter {
+                    core::iter::once(impl_for_tuple!(
+                        @nth [$($params0),*]
+                        [
+                            self.0, self.1, self.2, self.3, self.4, self.5, self.6,
+                            self.7, self.8, self.9, self.10, self.11
+                        ]
+                    ))
+                }
+                fn len_of_arg(&self) -> usize {
+                    1
+                }
+            }
+
+            impl<U, $($params0,)* $param $(,$params1)*>
+                MapOfNthArgument<{impl_for_tuple!(@count $($params0),*)}, U>
+                for ($($params0,)* $param, $($params1),*)
+            {
+                type Output = ($($params0,)* U, $($params1),*);
+                fn map_of_param(self, mut f: impl FnMut(Self::Item) -> U) -> Self::Output {
+                    impl_for_tuple!(@wrap_f f[$($params0),*] $param [$($params1),*] [
+                        self.0, self.1, self.2, self.3, self.4, self.5, self.6,
+                        self.7, self.8, self.9, self.10, self.11
+                    ] {})
+                }
+            }
+        };
+        () => {
+            impl_for_tuple!([] T []);
+            impl_for_tuple!([] T [R0]);
+            impl_for_tuple!([] T [R0, R1]);
+            impl_for_tuple!([] T [R0, R1, R2]);
+            impl_for_tuple!([] T [R0, R1, R2, R3]);
+            impl_for_tuple!([] T [R0, R1, R2, R3, R4]);
+            impl_for_tuple!([] T [R0, R1, R2, R3, R4, R5]);
+            impl_for_tuple!([] T [R0, R1, R2, R3, R4, R5, R6]);
+            impl_for_tuple!([] T [R0, R1, R2, R3, R4, R5, R6, R7]);
+            impl_for_tuple!([] T [R0, R1, R2, R3, R4, R5, R6, R7, R8]);
+            impl_for_tuple!([] T [R0, R1, R2, R3, R4, R5, R6, R7, R8, R9]);
+            impl_for_tuple!([] T [R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10]);
+            impl_for_tuple!([L0] T []);
+            impl_for_tuple!([L0] T [R0]);
+            impl_for_tuple!([L0] T [R0, R1]);
+            impl_for_tuple!([L0] T [R0, R1, R2]);
+            impl_for_tuple!([L0] T [R0, R1, R2, R3]);
+            impl_for_tuple!([L0] T [R0, R1, R2, R3, R4]);
+            impl_for_tuple!([L0] T [R0, R1, R2, R3, R4, R5]);
+            impl_for_tuple!([L0] T [R0, R1, R2, R3, R4, R5, R6]);
+            impl_for_tuple!([L0] T [R0, R1, R2, R3, R4, R5, R6, R7]);
+            impl_for_tuple!([L0] T [R0, R1, R2, R3, R4, R5, R6, R7, R8]);
+            impl_for_tuple!([L0] T [R0, R1, R2, R3, R4, R5, R6, R7, R8, R9]);
+            impl_for_tuple!([L0, L1] T []);
+            impl_for_tuple!([L0, L1] T [R0]);
+            impl_for_tuple!([L0, L1] T [R0, R1]);
+            impl_for_tuple!([L0, L1] T [R0, R1, R2]);
+            impl_for_tuple!([L0, L1] T [R0, R1, R2, R3]);
+            impl_for_tuple!([L0, L1] T [R0, R1, R2, R3, R4]);
+            impl_for_tuple!([L0, L1] T [R0, R1, R2, R3, R4, R5]);
+            impl_for_tuple!([L0, L1] T [R0, R1, R2, R3, R4, R5, R6]);
+            impl_for_tuple!([L0, L1] T [R0, R1, R2, R3, R4, R5, R6, R7]);
+            impl_for_tuple!([L0, L1] T [R0, R1, R2, R3, R4, R5, R6, R7, R8]);
+            impl_for_tuple!([L0, L1, L2] T []);
+            impl_for_tuple!([L0, L1, L2] T [R0]);
+            impl_for_tuple!([L0, L1, L2] T [R0, R1]);
+            impl_for_tuple!([L0, L1, L2] T [R0, R1, R2]);
+            impl_for_tuple!([L0, L1, L2] T [R0, R1, R2, R3]);
+            impl_for_tuple!([L0, L1, L2] T [R0, R1, R2, R3, R4]);
+            impl_for_tuple!([L0, L1, L2] T [R0, R1, R2, R3, R4, R5]);
+            impl_for_tuple!([L0, L1, L2] T [R0, R1, R2, R3, R4, R5, R6]);
+            impl_for_tuple!([L0, L1, L2] T [R0, R1, R2, R3, R4, R5, R6, R7]);
+            impl_for_tuple!([L0, L1, L2, L3] T []);
+            impl_for_tuple!([L0, L1, L2, L3] T [R0]);
+            impl_for_tuple!([L0, L1, L2, L3] T [R0, R1]);
+            impl_for_tuple!([L0, L1, L2, L3] T [R0, R1, R2]);
+            impl_for_tuple!([L0, L1, L2, L3] T [R0, R1, R2, R3]);
+            impl_for_tuple!([L0, L1, L2, L3] T [R0, R1, R2, R3, R4]);
+            impl_for_tuple!([L0, L1, L2, L3] T [R0, R1, R2, R3, R4, R5]);
+            impl_for_tuple!([L0, L1, L2, L3] T [R0, R1, R2, R3, R4, R5, R6]);
+            impl_for_tuple!([L0, L1, L2, L3, L4] T []);
+            impl_for_tuple!([L0, L1, L2, L3, L4] T [R0]);
+            impl_for_tuple!([L0, L1, L2, L3, L4] T [R0, R1]);
+            impl_for_tuple!([L0, L1, L2, L3, L4] T [R0, R1, R2]);
+            impl_for_tuple!([L0, L1, L2, L3, L4] T [R0, R1, R2, R3]);
+            impl_for_tuple!([L0, L1, L2, L3, L4] T [R0, R1, R2, R3, R4]);
+            impl_for_tuple!([L0, L1, L2, L3, L4] T [R0, R1, R2, R3, R4, R5]);
+            impl_for_tuple!([L0, L1, L2, L3, L4, L5] T []);
+            impl_for_tuple!([L0, L1, L2, L3, L4, L5] T [R0]);
+            impl_for_tuple!([L0, L1, L2, L3, L4, L5] T [R0, R1]);
+            impl_for_tuple!([L0, L1, L2, L3, L4, L5] T [R0, R1, R2]);
+            impl_for_tuple!([L0, L1, L2, L3, L4, L5] T [R0, R1, R2, R3]);
+            impl_for_tuple!([L0, L1, L2, L3, L4, L5] T [R0, R1, R2, R3, R4]);
+            impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6] T []);
+            impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6] T [R0]);
+            impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6] T [R0, R1]);
+            impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6] T [R0, R1, R2]);
+            impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6] T [R0, R1, R2, R3]);
+            impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6, L7] T []);
+            impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6, L7] T [R0]);
+            impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6, L7] T [R0, R1]);
+            impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6, L7] T [R0, R1, R2]);
+            impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6, L7, L8] T []);
+            impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6, L7, L8] T [R0]);
+            impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6, L7, L8] T [R0, R1]);
+            impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6, L7, L8, L9] T []);
+            impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6, L7, L8, L9] T [R0]);
+            impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6, L7, L8, L9, L10] T []);
+        };
+    }
+    impl_for_tuple!();
+
     macro_rules! impl_into_iter {
         ($(
             [$($tpar:tt)*]
-            for $self_ty:ty  ;
+            for $self_ty:ty ;
         )*) => {
             $(
                 impl<$($tpar)*>
@@ -363,10 +505,7 @@ pub mod imp {
             self.len()
         }
     }
-    impl<U, T, E> MapOfNthArgument<1, U> for Result<T, E>
-    where
-        Result<U, E>: FromIterator<U>,
-    {
+    impl<U, T, E> MapOfNthArgument<1, U> for Result<T, E> {
         type Output = Result<T, U>;
         fn map_of_param(self, mut f: impl FnMut(Self::Item) -> U) -> Self::Output {
             match self {
