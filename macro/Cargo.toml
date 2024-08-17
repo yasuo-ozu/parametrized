@@ -1,0 +1,17 @@
+[package]
+name = "parametric-type-macro"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+proc-macro = true
+path = "lib.rs"
+
+[dependencies]
+proc-macro2 = "1.0"
+template-quote = "0.4"
+proc-macro-error = "1.0"
+
+[dependencies.syn]
+version = "2.0"
+features = [ "full", "derive", "printing", "extra-traits", "visit-mut"]

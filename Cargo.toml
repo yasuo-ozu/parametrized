@@ -1,6 +1,11 @@
 [package]
-name = "parametric_type"
+name = "parametric-type"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+parametric-type-macro = { version = "0.1.0", path = "macro" }
+
+[workspace]
+members = [".", "macro"]
+resolver = "2"
