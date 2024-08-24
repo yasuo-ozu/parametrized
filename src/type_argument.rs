@@ -495,6 +495,66 @@ impl<T, E> IntoIteratorOfNthArgument<1> for Result<T, E> {
         }
     }
 }
+impl<'a, K, V> IntoIteratorOfNthArgument<0> for &'a std::collections::BTreeMap<K, V> {
+    type Item = &'a K;
+    // type IntoIter = std::collections::hash_map::Keys<'a, K, V>;
+    const MIN_LEN: usize = 0;
+    const MAX_LEN: Option<usize> = None;
+    fn into_iter_of_arg(self) -> impl Iterator<Item = Self::Item> {
+        self.keys()
+    }
+    fn len_of_arg(&self) -> usize {
+        self.len()
+    }
+}
+impl<K, V> IntoIteratorOfNthArgument<0> for std::collections::BTreeMap<K, V> {
+    type Item = K;
+    // type IntoIter = std::collections::hash_map::IntoKeys<K, V>;
+    const MIN_LEN: usize = 0;
+    const MAX_LEN: Option<usize> = None;
+    fn into_iter_of_arg(self) -> impl Iterator<Item = Self::Item> {
+        self.into_keys()
+    }
+    fn len_of_arg(&self) -> usize {
+        self.len()
+    }
+}
+impl<'a, K, V> IntoIteratorOfNthArgument<1> for &'a std::collections::BTreeMap<K, V> {
+    type Item = &'a V;
+    // type IntoIter = std::collections::hash_map::Values<'a, K, V>;
+    const MIN_LEN: usize = 0;
+    const MAX_LEN: Option<usize> = None;
+    fn into_iter_of_arg(self) -> impl Iterator<Item = Self::Item> {
+        self.values()
+    }
+    fn len_of_arg(&self) -> usize {
+        self.len()
+    }
+}
+impl<'a, K, V> IntoIteratorOfNthArgument<1> for &'a mut std::collections::BTreeMap<K, V> {
+    type Item = &'a mut V;
+    // type IntoIter = std::collections::hash_map::ValuesMut<'a, K, V>;
+    const MIN_LEN: usize = 0;
+    const MAX_LEN: Option<usize> = None;
+    fn into_iter_of_arg(self) -> impl Iterator<Item = Self::Item> {
+        self.values_mut()
+    }
+    fn len_of_arg(&self) -> usize {
+        self.len()
+    }
+}
+impl<K, V> IntoIteratorOfNthArgument<1> for std::collections::BTreeMap<K, V> {
+    type Item = V;
+    // type IntoIter = std::collections::hash_map::IntoValues<K, V>;
+    const MIN_LEN: usize = 0;
+    const MAX_LEN: Option<usize> = None;
+    fn into_iter_of_arg(self) -> impl Iterator<Item = Self::Item> {
+        self.into_values()
+    }
+    fn len_of_arg(&self) -> usize {
+        self.len()
+    }
+}
 impl<'a, K, V> IntoIteratorOfNthArgument<0> for &'a std::collections::HashMap<K, V> {
     type Item = &'a K;
     // type IntoIter = std::collections::hash_map::Keys<'a, K, V>;

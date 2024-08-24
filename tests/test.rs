@@ -44,11 +44,11 @@ fn test2() {
 }
 
 #[parametric_type(K, iter, iter_mut)]
-struct Struct3<'a, K>(&'a mut std::collections::HashMap<usize, K>);
+struct Struct3<'a, K>(&'a mut std::collections::BTreeMap<usize, K>);
 
 #[test]
 fn test3() {
-    let mut m: std::collections::HashMap<_, _> =
+    let mut m: std::collections::BTreeMap<_, _> =
         vec![(123, "hello"), (456, "world")].into_iter().collect();
     let mut s = Struct3(&mut m);
     assert_eq!((&s).len_of_arg(), 2);
