@@ -20,6 +20,40 @@ pub trait MapOfNthArgument<const INDEX: usize, T>: IntoIteratorOfNthArgument<IND
     fn map_of_param(self, _: impl FnMut(Self::Item) -> T) -> Self::Output;
 }
 
+impl<'a, const INDEX: usize, T> IntoIteratorOfNthArgument<INDEX> for &'a &'a T
+where
+    &'a T: IntoIteratorOfNthArgument<INDEX>,
+{
+    type Item = <&'a T as IntoIteratorOfNthArgument<INDEX>>::Item;
+    const MIN_LEN: usize = <&'a T as IntoIteratorOfNthArgument<INDEX>>::MIN_LEN;
+    const MAX_LEN: Option<usize> = <&'a T as IntoIteratorOfNthArgument<INDEX>>::MAX_LEN;
+
+    fn into_iter_of_arg(self) -> impl Iterator<Item = Self::Item> {
+        <&'a T as IntoIteratorOfNthArgument<INDEX>>::into_iter_of_arg(*self)
+    }
+
+    fn len_of_arg(&self) -> usize {
+        <&'a T as IntoIteratorOfNthArgument<INDEX>>::len_of_arg(self)
+    }
+}
+
+impl<'a, const INDEX: usize, T> IntoIteratorOfNthArgument<INDEX> for &'a mut &'a mut T
+where
+    &'a mut T: IntoIteratorOfNthArgument<INDEX>,
+{
+    type Item = <&'a mut T as IntoIteratorOfNthArgument<INDEX>>::Item;
+    const MIN_LEN: usize = <&'a mut T as IntoIteratorOfNthArgument<INDEX>>::MIN_LEN;
+    const MAX_LEN: Option<usize> = <&'a mut T as IntoIteratorOfNthArgument<INDEX>>::MAX_LEN;
+
+    fn into_iter_of_arg(self) -> impl Iterator<Item = Self::Item> {
+        <&'a mut T as IntoIteratorOfNthArgument<INDEX>>::into_iter_of_arg(*self)
+    }
+
+    fn len_of_arg(&self) -> usize {
+        <&'a mut T as IntoIteratorOfNthArgument<INDEX>>::len_of_arg(self)
+    }
+}
+
 macro_rules! impl_for_tuple {
     (@wrap_f $fn:ident[] [] [$($_:expr),*] {$($out:expr),*}) => {($($out,)*)};
     (@wrap_f $fn:ident[] [$_:ident$(,$params1:ident)*] [$rhs:expr $(,$t:expr)*] {$($out:expr),*}) => {

@@ -6,12 +6,16 @@ use std::collections::HashMap;
 use syn::parse::Parse;
 use syn::spanned::Spanned;
 use syn::*;
-use template_quote::quote;
+use template_quote::{quote, ToTokens};
 
 #[derive(Default)]
 struct Arguments {
     map: HashMap<Ident, Type>,
     krate: Option<Path>,
+    impl_into_iter: bool,
+    impl_iter: bool,
+    impl_iter_mut: bool,
+    impl_map: bool,
 }
 
 impl Parse for Arguments {
@@ -27,6 +31,18 @@ impl Parse for Arguments {
             match ty {
                 Type::Path(TypePath { qself, path }) if ident == "krate" && qself.is_none() => {
                     ret.krate = Some(path);
+                }
+                Type::Path(TypePath { qself, .. }) if ident == "into_iter" && qself.is_none() => {
+                    ret.impl_into_iter = true;
+                }
+                Type::Path(TypePath { qself, .. }) if ident == "iter" && qself.is_none() => {
+                    ret.impl_iter = true;
+                }
+                Type::Path(TypePath { qself, .. }) if ident == "iter_mut" && qself.is_none() => {
+                    ret.impl_iter_mut = true;
+                }
+                Type::Path(TypePath { qself, .. }) if ident == "map" && qself.is_none() => {
+                    ret.impl_map = true;
                 }
                 ty if ident.to_string().len() == 1 => {
                     ret.map.insert(ident, ty);
@@ -77,6 +93,44 @@ enum Generator {
 }
 
 impl Generator {
+    fn and(&self) -> TokenStream {
+        match self {
+            Self::Iter | Self::Len | Self::MinLen | Self::MaxLen => quote!(&),
+            Self::IterMut => quote!(&mut),
+            _ => quote!(),
+        }
+    }
+    fn generate_if_pure(
+        &self,
+        replacing_ty: &Type,
+        ty: &Type,
+        expr: &TokenStream,
+    ) -> Option<TokenStream> {
+        if ty == replacing_ty {
+            match self {
+                Generator::MinLen => Some(quote! {1usize}),
+                Generator::MaxLen => Some(quote! {::core::option::Option::Some(1usize)}),
+                Generator::Len => Some(quote! {1usize}),
+                Generator::Iter | Generator::IterMut | Generator::IntoIter => {
+                    Some(quote! {::core::iter::once(#expr)})
+                }
+                Generator::Map(map_fn, _) => Some(quote! {#map_fn(#expr)}),
+            }
+        } else if let Type::Reference(TypeReference {
+            mutability, elem, ..
+        }) = ty
+        {
+            match (self, mutability.is_some()) {
+                (Self::MinLen | Self::MaxLen | Self::Len | Self::Iter, _)
+                | (Self::IterMut, true) => {
+                    self.generate_if_pure(replacing_ty, elem, &quote!(*#expr))
+                }
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
     fn generate(
         &self,
         krate: &Path,
@@ -84,18 +138,8 @@ impl Generator {
         ty: &Type,
         expr: &TokenStream,
     ) -> std::result::Result<Option<TokenStream>, Type> {
-        if ty == replacing_ty {
-            match self {
-                Generator::MinLen => return Ok(Some(quote! {1usize})),
-                Generator::MaxLen => {
-                    return Ok(Some(quote! {::core::option::Option::Some(1usize)}))
-                }
-                Generator::Len => return Ok(Some(quote! {1usize})),
-                Generator::Iter => return Ok(Some(quote! {&#expr})),
-                Generator::IterMut => return Ok(Some(quote! {&mut #expr})),
-                Generator::IntoIter => return Ok(Some(quote! {::core::iter::once(#expr)})),
-                Generator::Map(map_fn, _) => return Ok(Some(quote! {#map_fn(#expr)})),
-            }
+        if let Some(out) = self.generate_if_pure(replacing_ty, ty, expr) {
+            return Ok(Some(out));
         }
         let indexed_ty_args = match ty {
             Type::Slice(TypeSlice { elem, .. }) | Type::Array(TypeArray { elem, .. }) => {
@@ -136,7 +180,9 @@ impl Generator {
                 | (_, Self::MinLen)
                 | (_, Self::Len)
                 | (_, Self::Iter)
-                | (Some(_), Self::IterMut) => vec![(0, elem.as_ref())],
+                | (Some(_), Self::IterMut) => {
+                    return self.generate(krate, replacing_ty, elem.as_ref(), expr);
+                }
                 _ => return Err(ty.clone()),
             },
             Type::Tuple(TypeTuple { elems, .. }) => elems.iter().enumerate().collect(),
@@ -159,7 +205,14 @@ impl Generator {
         }
         let mut indexed = Vec::new();
         for (index, inner_ty) in indexed_ty_args.into_iter() {
+            eprintln!("inner_ty = {}", quote! {#inner_ty});
             if let Some(generated) = self.generate(krate, replacing_ty, inner_ty, &map_arg)? {
+                eprintln!(
+                    "inner_ty = {}, index = {}, generated = {}",
+                    quote! {#inner_ty},
+                    &index,
+                    &generated
+                );
                 indexed.push((index, generated));
             }
         }
@@ -201,11 +254,7 @@ impl Generator {
             }
             Generator::Iter | Generator::IterMut | Generator::IntoIter => {
                 Ok(Some(indexed.into_iter().fold(quote!(::core::iter::empty()), |acc, (idx, inner)| {
-                    let and = match self {
-                        Generator::Iter => quote!{&},
-                        Generator::IterMut => quote!{&mut},
-                        _ => quote!{}
-                    };
+                    let and = self.and();
                     quote! {
                         #acc.chain(
                             <#and #ty as #krate::type_argument::IntoIteratorOfNthArgument<#idx>>::into_iter_of_arg(#expr)
@@ -244,11 +293,7 @@ fn inner(arg: Arguments, input: Item) -> TokenStream {
                     }
                     Generator::Map(_, _) => todo!(),
                 };
-                let and = if let Generator::Len = generator {
-                    quote!(&)
-                } else {
-                    quote!()
-                };
+                let and = generator.and();
                 Ok(items
                     .iter()
                     .filter_map(|(ty, expr)| {
@@ -276,6 +321,8 @@ fn inner(arg: Arguments, input: Item) -> TokenStream {
         Item::Enum(_) => todo!(),
         Item::Struct(item_struct) => {
             let (impl_generics, ty_generics, where_clause) = item_struct.generics.split_for_impl();
+            let impl_generics: AngleBracketedGenericArguments =
+                parse2(impl_generics.into_token_stream()).unwrap();
             for (i, par) in
                 item_struct
                     .generics
@@ -307,31 +354,101 @@ fn inner(arg: Arguments, input: Item) -> TokenStream {
                         }
                     })
                     .collect();
-                if let [out_minlen, out_maxlen, out_iter, out_len] = generate_with_generator(
-                    &krate,
-                    &[
-                        Generator::MinLen,
-                        Generator::MaxLen,
-                        Generator::IntoIter,
-                        Generator::Len,
-                    ],
-                    &parse_quote!(#par),
-                    items.as_ref(),
-                )
-                .unwrap_or_else(|e| abort!(e.span(), "Cannot implement IntoIteratorOfNthArgument"))
-                .as_slice()
-                {
-                    out.extend(quote! {
-                        impl #impl_generics #krate::type_argument::IntoIteratorOfNthArgument<#i> for #{&item_struct.ident} #ty_generics #where_clause {
-                            type Item = #par;
-                            const MIN_LEN: usize = #out_minlen;
-                            const MAX_LEN: Option<usize> = #out_maxlen;
-                            fn into_iter_of_arg(self) -> impl ::core::iter::Iterator<Item = Self::Item> { #out_iter }
-                            fn len_of_arg(&self) -> usize { #out_len }
-                        }
+                if arg.impl_into_iter {
+                    if let [out_minlen, out_maxlen, out_iter, out_len] = generate_with_generator(
+                        &krate,
+                        &[
+                            Generator::MinLen,
+                            Generator::MaxLen,
+                            Generator::IntoIter,
+                            Generator::Len,
+                        ],
+                        &parse_quote!(#par),
+                        items.as_ref(),
+                    )
+                    .unwrap_or_else(|e| {
+                        abort!(e.span(), "Cannot implement IntoIteratorOfNthArgument")
                     })
-                } else {
-                    unreachable!()
+                    .as_slice()
+                    {
+                        out.extend(quote! {
+                            impl #impl_generics #krate::type_argument::IntoIteratorOfNthArgument<#i> for #{&item_struct.ident} #ty_generics #where_clause {
+                                type Item = #par;
+                                const MIN_LEN: usize = #out_minlen;
+                                const MAX_LEN: Option<usize> = #out_maxlen;
+                                fn into_iter_of_arg(self) -> impl ::core::iter::Iterator<Item = Self::Item> { #out_iter }
+                                fn len_of_arg(&self) -> usize { #out_len }
+                            }
+                        })
+                    } else {
+                        unreachable!()
+                    }
+                }
+                if arg.impl_iter {
+                    if let [out_minlen, out_maxlen, out_iter, out_len] = generate_with_generator(
+                        &krate,
+                        &[
+                            Generator::MinLen,
+                            Generator::MaxLen,
+                            Generator::Iter,
+                            Generator::Len,
+                        ],
+                        &parse_quote!(#par),
+                        items.as_ref(),
+                    )
+                    .unwrap_or_else(|e| {
+                        abort!(e.span(), "Cannot implement IntoIteratorOfNthArgument")
+                    })
+                    .as_slice()
+                    {
+                        out.extend(quote! {
+                            impl<
+                                '__parametric_type_lt
+                                #(for g in &impl_generics.args){,#g}
+                            > #krate::type_argument::IntoIteratorOfNthArgument<#i> for &'__parametric_type_lt #{&item_struct.ident} #ty_generics #where_clause {
+                                type Item = &'__parametric_type_lt #par;
+                                const MIN_LEN: usize = #out_minlen;
+                                const MAX_LEN: Option<usize> = #out_maxlen;
+                                fn into_iter_of_arg(self) -> impl ::core::iter::Iterator<Item = Self::Item> { #out_iter }
+                                fn len_of_arg(&self) -> usize { #out_len }
+                            }
+                        })
+                    } else {
+                        unreachable!()
+                    }
+                }
+                if arg.impl_iter_mut {
+                    if let [out_minlen, out_maxlen, out_iter, out_len] = generate_with_generator(
+                        &krate,
+                        &[
+                            Generator::MinLen,
+                            Generator::MaxLen,
+                            Generator::IterMut,
+                            Generator::Len,
+                        ],
+                        &parse_quote!(#par),
+                        items.as_ref(),
+                    )
+                    .unwrap_or_else(|e| {
+                        abort!(e.span(), "Cannot implement IntoIteratorOfNthArgument")
+                    })
+                    .as_slice()
+                    {
+                        out.extend(quote! {
+                            impl<
+                                '__parametric_type_lt
+                                #(for g in &impl_generics.args){,#g}
+                            > #krate::type_argument::IntoIteratorOfNthArgument<#i> for &'__parametric_type_lt mut #{&item_struct.ident} #ty_generics #where_clause {
+                                type Item = &'__parametric_type_lt mut #par;
+                                const MIN_LEN: usize = #out_minlen;
+                                const MAX_LEN: Option<usize> = #out_maxlen;
+                                fn into_iter_of_arg(self) -> impl ::core::iter::Iterator<Item = Self::Item> { #out_iter }
+                                fn len_of_arg(&self) -> usize { #out_len }
+                            }
+                        })
+                    } else {
+                        unreachable!()
+                    }
                 }
             }
             quote! {
