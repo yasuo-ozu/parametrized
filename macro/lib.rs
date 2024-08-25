@@ -412,6 +412,7 @@ fn inner(arg: Arguments, input: Item) -> TokenStream {
                     let out_minlen = squash_minlens(out_minlens.as_slice());
                     let out_maxlen = squash_maxlens(out_maxlens.as_slice());
                     out.extend(quote! {
+                        #[#krate::_imp::sumtype]
                             impl #impl_generics #krate::type_argument::IntoIteratorOfNthArgument<#i> for #ident #ty_generics #where_clause {
                                 type Item = #par;
                                 const MIN_LEN: usize = #out_minlen;
@@ -426,8 +427,7 @@ fn inner(arg: Arguments, input: Item) -> TokenStream {
                                             #(if let Fields::Unnamed(_) = &variant.fields) {
                                                 ( #(#idents),* )
                                             }
-                                            // TODO: zero cost abstraction
-                                            => Box::new(#out) as Box<dyn Iterator<Item = Self::Item>>,
+                                            => sumtype!(#out),
                                         }
                                     }
                                 }
@@ -478,10 +478,12 @@ fn inner(arg: Arguments, input: Item) -> TokenStream {
                     let out_minlen = squash_minlens(out_minlens.as_slice());
                     let out_maxlen = squash_maxlens(out_maxlens.as_slice());
                     out.extend(quote! {
+                            #[#krate::_imp::sumtype]
                             impl<
                                 '__parametric_type_lt
                                 #(for g in &impl_generics.args){,#g}
-                            > #krate::type_argument::IntoIteratorOfNthArgument<#i> for &'__parametric_type_lt #ident #ty_generics #where_clause {
+                            > #krate::type_argument::IntoIteratorOfNthArgument<#i> for &'__parametric_type_lt #ident #ty_generics #where_clause
+                             {
                                 type Item = &'__parametric_type_lt #par;
                                 const MIN_LEN: usize = #out_minlen;
                                 const MAX_LEN: Option<usize> = #out_maxlen;
@@ -495,7 +497,7 @@ fn inner(arg: Arguments, input: Item) -> TokenStream {
                                             #(if let Fields::Unnamed(_) = &variant.fields) {
                                                 ( #(#idents),* )
                                             }
-                                            => Box::new(#out) as Box<dyn Iterator<Item = Self::Item>>,
+                                            => sumtype!(#out),
                                         }
                                     }
                                 }
@@ -546,10 +548,12 @@ fn inner(arg: Arguments, input: Item) -> TokenStream {
                     let out_minlen = squash_minlens(out_minlens.as_slice());
                     let out_maxlen = squash_maxlens(out_maxlens.as_slice());
                     out.extend(quote! {
+                            #[#krate::_imp::sumtype]
                             impl<
                                 '__parametric_type_lt
                                 #(for g in &impl_generics.args){,#g}
-                            > #krate::type_argument::IntoIteratorOfNthArgument<#i> for &'__parametric_type_lt mut #ident #ty_generics #where_clause {
+                            > #krate::type_argument::IntoIteratorOfNthArgument<#i> for &'__parametric_type_lt mut #ident #ty_generics #where_clause
+                            {
                                 type Item = &'__parametric_type_lt mut #par;
                                 const MIN_LEN: usize = #out_minlen;
                                 const MAX_LEN: Option<usize> = #out_maxlen;
@@ -563,7 +567,7 @@ fn inner(arg: Arguments, input: Item) -> TokenStream {
                                             #(if let Fields::Unnamed(_) = &variant.fields) {
                                                 ( #(#idents),* )
                                             }
-                                            => Box::new(#out) as Box<dyn Iterator<Item = Self::Item>>,
+                                            => sumtype!(#out),
                                         }
                                     }
                                 }

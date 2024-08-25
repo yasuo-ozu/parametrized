@@ -43,3 +43,8 @@ pub unsafe trait MapOfLabel<const LABEL: char, P>: IntoIterOfLabel<LABEL> {
     type Output;
     fn map(self, f: impl FnMut(Self::Item) -> P) -> Self::Output;
 }
+
+#[doc(hidden)]
+pub mod _imp {
+    pub use sumtype::sumtype;
+}

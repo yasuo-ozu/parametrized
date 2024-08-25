@@ -1,12 +1,11 @@
 use parametric_type::parametric_type;
-use parametric_type::type_argument::{IntoIteratorOfNthArgument, MapOfNthArgument};
+use parametric_type::type_argument::IntoIteratorOfNthArgument;
 
-// TODO: remove 'static
 #[parametric_type(K, iter, iter_mut, into_iter)]
-enum Enum1<K: 'static> {
+enum Enum1<K> {
     V1,
     V2(K),
-    V3 { f1: usize, f2: K },
+    V3 { _f1: usize, _f2: K },
 }
 
 #[test]
@@ -25,4 +24,9 @@ fn test1() {
     });
     assert_eq!((&e2).into_iter_of_arg().collect::<Vec<_>>(), vec![&246]);
     assert_eq!(e2.into_iter_of_arg().collect::<Vec<_>>(), vec![246]);
+    let e3 = Enum1::V3 {
+        _f1: 1,
+        _f2: 2usize,
+    };
+    assert_eq!((&e3).len_of_arg(), 1);
 }

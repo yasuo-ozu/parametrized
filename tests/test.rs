@@ -1,5 +1,5 @@
 use parametric_type::parametric_type;
-use parametric_type::type_argument::{IntoIteratorOfNthArgument, MapOfNthArgument};
+use parametric_type::type_argument::IntoIteratorOfNthArgument;
 
 #[allow(unused)]
 #[parametric_type(K, into_iter, iter, iter_mut, map)]
