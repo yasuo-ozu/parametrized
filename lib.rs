@@ -294,7 +294,7 @@ macro_rules! impl_for_tuple {
         impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6, L7, L8, L9, L10] T []);
     };
 }
-impl_for_tuple!();
+//impl_for_tuple!();
 
 macro_rules! emit_impl_trait {
     (
@@ -316,7 +316,7 @@ macro_rules! emit_impl_trait {
             type Item = $item_ty;
             const MIN_LEN: usize = $min_len;
             const MAX_LEN: Option<usize> = $max_len;
-            fn param_len(&self) -> usize { $($param_len)* }
+            fn param_len(&$self_val) -> usize { $($param_len)* }
         }
 
     };
@@ -336,7 +336,7 @@ macro_rules! emit_impl_trait {
     ) => {
         impl<$($tpar)*> ParametrizedIter<$n> for $self_ty
         {
-            type Iter<$lt> = $iter_ty;
+            type Iter<$lt> = $iter_ty where (Self, Self::Item): $lt;
             fn param_iter<$lt>(& $lt $self_val) -> Self::Iter<$lt> where Self::Item: $lt {
                 $($param_iter)*
             }
@@ -366,8 +366,8 @@ macro_rules! emit_impl_trait {
     ) => {
         impl<$($tpar)*> ParametrizedIterMut<$n> for $self_ty
         {
-            type IterMut<$lt> = $iter_mut_ty;
-            fn param_iter_mut<$lt>(& $lt mut $self_val) -> Self::IterMut<$lt> {
+            type IterMut<$lt> = $iter_mut_ty where (Self, Self::Item): $lt;
+            fn param_iter_mut<$lt>(& $lt mut $self_val) -> Self::IterMut<$lt> where Self::Item: $lt {
                 $($param_iter_mut)*
             }
         }
@@ -434,7 +434,7 @@ macro_rules! emit_impl_trait {
         impl<$($tpar)*,$arg_ty> ParametrizedMap<$n, $arg_ty> for $self_ty
         {
             type Mapped = $mapped_ty;
-            fn param_map($self_val, mut $f_val: impl FnMut(Self::Item) -> $arg_ty) -> Self::Mapped {
+            fn param_map($self_val, $f_val: impl FnMut(Self::Item) -> $arg_ty) -> Self::Mapped {
                 $($param_map)*
             }
         }
@@ -460,15 +460,15 @@ macro_rules! impl_all {
     )*) => {
         $(
             emit_impl_trait!(
-                [$($fn),*]
+                [$($fn,)*]
                 impl_generics = [$($tpar)*],
                 PARAM = 0,
                 Self = $self_ty,
                 self = self,
                 {
-                    Item = <&'static Self as IntoIterator>::Item,
+                    Item = <Self as IntoIterator>::Item,
                     MIN_LEN = 0,
-                    MAX_LEN = usize,
+                    MAX_LEN = None,
                     param_len = { self.len() },
                 }
                 {
@@ -497,20 +497,210 @@ macro_rules! impl_all {
 
 impl_all! {
     [T] map, into_iter, iter_mut, iter for Vec<T>, T = M, Mapped = Vec<M>;
-    [T] iter_mut, iter for [T];
-    [T] map, into_iter, iter for std::collections::BTreeSet<T>,
-        T = M, Mapped = std::collections::BTreeSet<M>;
-    [T] map, into_iter, iter for std::collections::HashSet<T>,
-        T = M, Mapped = std::collections::HashSet<M>;
-    [T] map, into_iter, iter for std::collections::BinaryHeap<T>,
-        T = M, Mapped = std::collections::BinaryHeap<M>;
+    [T] into_iter, iter for std::collections::BTreeSet<T>;
+    [T] into_iter, iter for std::collections::HashSet<T>;
+    [T] into_iter, iter for std::collections::BinaryHeap<T>;
     [T] map, into_iter, iter_mut, iter for std::collections::LinkedList<T>,
         T = M, Mapped = std::collections::LinkedList<M>;
     [T] map, into_iter, iter_mut, iter for std::collections::VecDeque<T>,
-        T = M, Mapped = std::collections::VecDeque<T>;
-    [const N: usize, T] into_iter, iter_mut, iter for [T; N]; // TODO: map
-    [T] into_iter, iter_mut, iter for Option<T>; // TODO: map
-    [T] into_iter, iter_mut, iter for Result<T, E>; // TODO: map, (1)
+        T = M, Mapped = std::collections::VecDeque<M>;
+    [const N: usize, T] into_iter, iter_mut, iter for [T; N];
+}
+
+impl<T, M: Ord> ParametrizedMap<0, M> for std::collections::BTreeSet<T> {
+    type Mapped = std::collections::BTreeSet<M>;
+    fn param_map(self, f: impl FnMut(Self::Item) -> M) -> Self::Mapped
+    where
+        Self::Item: Sized,
+    {
+        self.into_iter().map(f).collect()
+    }
+}
+impl<T, M: Eq + Hash> ParametrizedMap<0, M> for std::collections::HashSet<T> {
+    type Mapped = std::collections::HashSet<M>;
+
+    fn param_map(self, f: impl FnMut(Self::Item) -> M) -> Self::Mapped
+    where
+        Self::Item: Sized,
+    {
+        self.into_iter().map(f).collect()
+    }
+}
+impl<T, M: Ord> ParametrizedMap<0, M> for std::collections::BinaryHeap<T> {
+    type Mapped = std::collections::BinaryHeap<M>;
+
+    fn param_map(self, f: impl FnMut(Self::Item) -> M) -> Self::Mapped
+    where
+        Self::Item: Sized,
+    {
+        self.into_iter().map(f).collect()
+    }
+}
+impl<T, E> Parametrized<0> for Result<T, E> {
+    type Item = T;
+    const MIN_LEN: usize = 0;
+    const MAX_LEN: Option<usize> = Some(1);
+    fn param_len(&self) -> usize {
+        self.is_ok() as usize
+    }
+}
+impl<T, E> ParametrizedIter<0> for Result<T, E> {
+    type Iter<'a> = std::result::Iter<'a, T> where (T,E):'a;
+    fn param_iter<'a>(&'a self) -> Self::Iter<'a>
+    where
+        Self::Item: 'a,
+    {
+        self.iter()
+    }
+}
+impl<T, E> ParametrizedIterMut<0> for Result<T, E> {
+    type IterMut<'a> = std::result::IterMut<'a,T>
+    where
+        (Self, Self::Item): 'a;
+
+    fn param_iter_mut<'a>(&'a mut self) -> Self::IterMut<'a>
+    where
+        Self::Item: 'a,
+    {
+        self.iter_mut()
+    }
+}
+impl<T, E> ParametrizedIntoIter<0> for Result<T, E> {
+    type IntoIter = std::result::IntoIter<T>
+    where
+        Self::Item: Sized;
+
+    fn param_into_iter(self) -> Self::IntoIter
+    where
+        Self::Item: Sized,
+    {
+        self.into_iter()
+    }
+}
+impl<T, E, M> ParametrizedMap<0, M> for Result<T, E> {
+    type Mapped = Result<M, E>;
+
+    fn param_map(self, f: impl FnMut(Self::Item) -> M) -> Self::Mapped
+    where
+        Self::Item: Sized,
+    {
+        self.map(f)
+    }
+}
+
+impl<T, E> Parametrized<1> for Result<T, E> {
+    type Item = E;
+    const MIN_LEN: usize = 0;
+    const MAX_LEN: Option<usize> = Some(1);
+    fn param_len(&self) -> usize {
+        self.is_err() as usize
+    }
+}
+impl<T, E> ParametrizedIter<1> for Result<T, E> {
+    type Iter<'a> = std::option::IntoIter<&'a E> where (T, E): 'a;
+
+    fn param_iter<'a>(&'a self) -> Self::Iter<'a>
+    where
+        (T, E): 'a,
+    {
+        self.as_ref().err().into_iter()
+    }
+}
+impl<T, E> ParametrizedIterMut<1> for Result<T, E> {
+    type IterMut<'a> = std::option::IntoIter<&'a mut E> where (T,E):'a;
+
+    fn param_iter_mut<'a>(&'a mut self) -> Self::IterMut<'a>
+    where
+        Self::Item: 'a,
+    {
+        self.as_mut().err().into_iter()
+    }
+}
+impl<T, E> ParametrizedIntoIter<1> for Result<T, E> {
+    type IntoIter = std::option::IntoIter<E>;
+    fn param_into_iter(self) -> Self::IntoIter
+    where
+        Self::Item: Sized,
+    {
+        self.err().into_iter()
+    }
+}
+impl<T, E, M> ParametrizedMap<1, M> for Result<T, E> {
+    type Mapped = Result<T, M>;
+    fn param_map(self, f: impl FnMut(Self::Item) -> M) -> Self::Mapped
+    where
+        Self::Item: Sized,
+    {
+        self.map_err(f)
+    }
+}
+impl<const N: usize, T, M> ParametrizedMap<0, M> for [T; N] {
+    type Mapped = [M; N];
+
+    fn param_map(self, f: impl FnMut(Self::Item) -> M) -> Self::Mapped
+    where
+        Self::Item: Sized,
+    {
+        self.map(f)
+    }
+}
+impl<T> ParametrizedIterMut<0> for [T] {
+    type IterMut<'a> = std::slice::IterMut<'a, T> where T: 'a;
+    fn param_iter_mut<'a>(&'a mut self) -> Self::IterMut<'a>
+    where
+        T: 'a,
+    {
+        self.iter_mut()
+    }
+}
+impl<T> ParametrizedIter<0> for [T] {
+    type Iter<'a> = std::slice::Iter<'a, T> where T: 'a;
+    fn param_iter<'a>(&'a self) -> Self::Iter<'a>
+    where
+        Self::Item: 'a,
+    {
+        <&'a Self as IntoIterator>::into_iter(self)
+    }
+}
+impl<T> Parametrized<0> for [T] {
+    type Item = T;
+    const MIN_LEN: usize = 0;
+    const MAX_LEN: Option<usize> = None;
+    fn param_len(&self) -> usize {
+        self.len()
+    }
+}
+impl<T> ParametrizedIntoIter<0> for Option<T> {
+    type IntoIter = core::option::IntoIter<T>;
+    fn param_into_iter(self) -> Self::IntoIter {
+        <Self as IntoIterator>::into_iter(self)
+    }
+}
+impl<T> ParametrizedIterMut<0> for Option<T> {
+    type IterMut<'a> = core::option::IterMut<'a,T> where T:'a;
+    fn param_iter_mut<'a>(&'a mut self) -> Self::IterMut<'a>
+    where
+        T: 'a,
+    {
+        <&'a mut Self as IntoIterator>::into_iter(self)
+    }
+}
+impl<T> ParametrizedIter<0> for Option<T> {
+    type Iter<'a> = core::option::Iter<'a,T> where T:'a;
+    fn param_iter<'a>(&'a self) -> Self::Iter<'a>
+    where
+        Self::Item: 'a,
+    {
+        <&'a Self as IntoIterator>::into_iter(self)
+    }
+}
+impl<T> Parametrized<0> for Option<T> {
+    type Item = T;
+    const MIN_LEN: usize = 0;
+    const MAX_LEN: Option<usize> = None;
+    fn param_len(&self) -> usize {
+        self.is_some() as usize
+    }
 }
 
 impl<K, V> Parametrized<0> for std::collections::BTreeMap<K, V> {
