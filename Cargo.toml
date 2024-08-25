@@ -1,10 +1,13 @@
 [package]
-name = "parametric_type"
+name = "parametrized"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+path = "lib.rs"
+
 [dependencies]
-parametric-type-macro = { version = "0.1.0", path = "macro" }
+parametrized-macro = { version = "0.1.0", path = "macro" }
 sumtype = "0.1.1"
 
 [workspace]
