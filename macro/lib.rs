@@ -1,57 +1,319 @@
+mod generator;
 use proc_macro::TokenStream as TokenStream1;
+
 use proc_macro2::Span;
 use proc_macro2::TokenStream;
 use proc_macro_error::{abort, proc_macro_error};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use syn::parse::Parse;
 use syn::spanned::Spanned;
 use syn::*;
 use template_quote::{quote, ToTokens};
 
-#[derive(Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum TraitTarget {
+    Default,
+    IterMut,
+    IntoIter,
+    Map,
+}
+
+fn squash_minlens(outs: &[Expr]) -> Expr {
+    if outs.len() == 0 {
+        abort!(Span::call_site(), "needs one or more variants");
+    }
+    let mut acc = outs[outs.len() - 1].clone();
+    if outs.len() >= 2 {
+        for out in outs[0..(outs.len() - 2)].iter().rev() {
+            acc = parse_quote! {__parametric_type_min(#out, #acc)};
+        }
+    }
+    parse_quote! {
+        {
+            const fn __parametric_type_min(a: usize, b: usize) -> usize {
+                if a < b { a } else { b }
+            }
+            #acc
+        }
+    }
+}
+fn squash_maxlens(outs: &[Expr]) -> Expr {
+    if outs.len() == 0 {
+        abort!(Span::call_site(), "needs one or more variants");
+    }
+    let mut acc = outs[outs.len() - 1].clone();
+    if outs.len() >= 2 {
+        for out in outs[0..(outs.len() - 2)].iter().rev() {
+            acc = parse_quote! {__parametric_type_max(#out, #acc)};
+        }
+    }
+    parse_quote! {
+        {
+            const fn __parametric_type_max(a: Option<usize>, b: Option<usize>) -> Option<usize> {
+                match (a, b) {
+                    (Some(a), Some(b)) => if a > b { Some(a) } else { Some(b) }
+                    _ => None,
+                }
+            }
+            #acc
+        }
+    }
+}
+
+impl TraitTarget {
+    fn make_enough(mut set: HashSet<Self>) -> HashSet<Self> {
+        if set.contains(&Self::Map) {
+            set.insert(Self::IntoIter);
+        }
+        if set.contains(&Self::IntoIter) {
+            set.insert(Self::Default);
+        }
+        if set.contains(&Self::IterMut) {
+            set.insert(Self::Default);
+        }
+        set
+    }
+
+    fn emit(
+        &self,
+        krate: &Path,
+        ident: &Ident,
+        generics: &Generics,
+        param_index: usize,
+        replacing_ty: &Type,
+        self_val: &Ident,
+        tys_exprs: &[Vec<(Type, Expr)>],
+        mut f: impl FnMut(&[Expr]) -> TokenStream,
+    ) -> Result<TokenStream> {
+        let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
+        match self {
+            Self::Default => {
+                eprintln!("len");
+                let out_len = tys_exprs
+                    .iter()
+                    .map(|item| {
+                        let ret = generator::EmitContext {
+                            kind: generator::EmitLen,
+                            krate: krate.clone(),
+                            replacing_ty: replacing_ty.clone(),
+                        }
+                        .emit_for_tys_exprs(
+                            item.iter().map(|(a, b)| (a.clone(), parse_quote! {&#b})),
+                        );
+                        ret
+                    })
+                    .collect::<Result<Option<Vec<_>>>>()?
+                    .unwrap_or_else(|| abort!(Span::call_site(), "Cannot implement len method"));
+                eprintln!("max_len");
+                let out_max_len = tys_exprs
+                    .iter()
+                    .map(|item| {
+                        generator::EmitContext {
+                            kind: generator::EmitMaxLen,
+                            krate: krate.clone(),
+                            replacing_ty: replacing_ty.clone(),
+                        }
+                        .emit_for_tys_exprs(
+                            item.iter().map(|(a, b)| (a.clone(), parse_quote!(&#b))),
+                        )
+                    })
+                    .collect::<Result<Option<Vec<_>>>>()?
+                    .unwrap_or_else(|| abort!(Span::call_site(), "Cannot implement maxlen method"));
+                eprintln!("min_len");
+                let out_min_len = tys_exprs
+                    .iter()
+                    .map(|item| {
+                        generator::EmitContext {
+                            kind: generator::EmitMinLen,
+                            krate: krate.clone(),
+                            replacing_ty: replacing_ty.clone(),
+                        }
+                        .emit_for_tys_exprs(
+                            item.iter().map(|(a, b)| (a.clone(), parse_quote!(&#b))),
+                        )
+                    })
+                    .collect::<Result<Option<Vec<_>>>>()?
+                    .unwrap_or_else(|| abort!(Span::call_site(), "Cannot implement minlen method"));
+                eprintln!("iter");
+                let out_iter = tys_exprs
+                    .iter()
+                    .map(|item| {
+                        generator::EmitContext {
+                            kind: generator::EmitIter,
+                            krate: krate.clone(),
+                            replacing_ty: replacing_ty.clone(),
+                        }
+                        .emit_for_tys_exprs(
+                            item.iter().map(|(a, b)| (a.clone(), parse_quote!(&#b))),
+                        )
+                    })
+                    .collect::<Result<Option<Vec<_>>>>()?
+                    .unwrap_or_else(|| abort!(Span::call_site(), "Cannot implement iter method"));
+                Ok(quote! {
+                    impl #impl_generics #krate::Parametrized<#param_index> for #ident
+                    #ty_generics #where_clause {
+                        type Item = #replacing_ty;
+                        const MIN_LEN: usize = #{squash_minlens(out_min_len.as_slice())};
+                        const MAX_LEN: Option<usize> = #{squash_maxlens(out_max_len.as_slice())};
+                        fn param_len(&#self_val) -> usize {
+                            #{f(out_len.as_slice())}
+                        }
+                        type Iter<'a> = todo!() where (Self, Self::Item): 'a;
+                        fn param_iter<'a>(&'a #self_val) -> Self::Iter<'a>
+                        where
+                            Self::Item: 'a
+                        {
+                            #{f(out_iter.as_slice())}
+                        }
+                    }
+                })
+            }
+            Self::IterMut => {
+                let out_iter_mut = tys_exprs
+                    .iter()
+                    .map(|item| {
+                        generator::EmitContext {
+                            kind: generator::EmitIterMut,
+                            krate: krate.clone(),
+                            replacing_ty: replacing_ty.clone(),
+                        }
+                        .emit_for_tys_exprs(
+                            item.iter().map(|(a, b)| (a.clone(), parse_quote!(&mut #b))),
+                        )
+                    })
+                    .collect::<Result<Option<Vec<_>>>>()?
+                    .unwrap_or_else(|| {
+                        abort!(Span::call_site(), "Cannot implement iter_mut method")
+                    });
+                Ok(quote! {
+                    impl #impl_generics #krate::ParametrizedIterMut<#param_index> for #ident #ty_generics #where_clause {
+                        type IterMut<'a> = todo!() where (Self, Self::Item): 'a;
+                        fn param_iter_mut<'a>(&'a mut #self_val) -> Self::IterMut<'a>
+                        where
+                            Self::Item: 'a
+                        {
+                            #{f(out_iter_mut.as_slice())}
+                        }
+                    }
+                })
+            }
+            Self::IntoIter => {
+                let out_into_iter = tys_exprs
+                    .iter()
+                    .map(|item| {
+                        generator::EmitContext {
+                            kind: generator::EmitIntoIter,
+                            krate: krate.clone(),
+                            replacing_ty: replacing_ty.clone(),
+                        }
+                        .emit_for_tys_exprs(item.iter().map(|(a, b)| (a.clone(), b.clone())))
+                    })
+                    .collect::<Result<Option<Vec<_>>>>()?
+                    .unwrap_or_else(|| {
+                        abort!(Span::call_site(), "Cannot implement into_iter method")
+                    });
+                Ok(quote! {
+                    impl #impl_generics #krate::ParametrizedIntoIter<#param_index> for #ident #ty_generics #where_clause {
+                        type IntoIter = todo!();
+                        fn param_into_iter(#self_val) -> Self::IntoIter
+                        {
+                            #{f(out_into_iter.as_slice())}
+                        }
+                    }
+                })
+            }
+            Self::Map => {
+                let out_map = tys_exprs
+                    .iter()
+                    .map(|item| {
+                        generator::EmitContext {
+                            kind: generator::EmitMap,
+                            krate: krate.clone(),
+                            replacing_ty: replacing_ty.clone(),
+                        }
+                        .emit_for_tys_exprs(item.iter().map(|(a, b)| (a.clone(), b.clone())))
+                    })
+                    .collect::<Result<Option<Vec<_>>>>()?
+                    .unwrap_or_else(|| abort!(Span::call_site(), "Cannot implement map method"));
+                Ok(quote! {
+                    impl #impl_generics #krate::ParametrizedIntoIter<#param_index> for #ident #ty_generics #where_clause {
+                        type IntoIter = todo!();
+                        fn param_into_iter(#self_val) -> Self::IntoIter
+                        {
+                            #{f(out_map.as_slice())}
+                        }
+                    }
+                })
+            }
+        }
+    }
+}
+
+impl Parse for TraitTarget {
+    fn parse(input: parse::ParseStream) -> Result<Self> {
+        let ident: Ident = input.fork().parse()?;
+        let r = match ident.to_string().as_str() {
+            "default" => Self::Default,
+            "iter_mut" => Self::IterMut,
+            "into_iter" => Self::IntoIter,
+            "map" => Self::Map,
+            _ => return Err(input.error("Require one of `iter`, `iter_mut`, `into_iter`, `map`")),
+        };
+        input.parse::<Ident>()?;
+        Ok(r)
+    }
+}
+
+#[derive(Debug, Default)]
 struct Arguments {
-    map: HashMap<Ident, Type>,
+    trait_impls: HashMap<usize, HashSet<TraitTarget>>,
     krate: Option<Path>,
-    impl_into_iter: bool,
-    impl_iter: bool,
-    impl_iter_mut: bool,
-    impl_map: bool,
 }
 
 impl Parse for Arguments {
     fn parse(input: parse::ParseStream) -> Result<Self> {
         let mut ret: Self = Default::default();
         while input.peek(Ident) {
-            let ident: Ident = input.parse()?;
-            let ty: Type = if let Ok(_) = input.parse::<Token![:]>() {
-                input.parse()?
+            if let Ok(tr) = input.parse::<TraitTarget>() {
+                // parse number or array
+                let param_indices = if input.parse::<Token![=]>().is_ok() {
+                    if let Ok(expr_arr) = input.parse::<ExprArray>() {
+                        expr_arr
+                            .elems
+                            .into_iter()
+                            .map(|expr| {
+                                if let Expr::Lit(ExprLit {
+                                    lit: Lit::Int(lit), ..
+                                }) = expr
+                                {
+                                    lit.base10_parse::<usize>()
+                                } else {
+                                    Err(Error::new(expr.span(), "Bad integer"))
+                                }
+                            })
+                            .collect::<Result<Vec<_>>>()?
+                    } else {
+                        vec![input.parse::<LitInt>()?.base10_parse::<usize>()?]
+                    }
+                } else {
+                    vec![0]
+                };
+                for param_index in param_indices {
+                    ret.trait_impls
+                        .entry(param_index)
+                        .or_insert(HashSet::new())
+                        .insert(tr.clone());
+                }
             } else {
-                parse_quote!(#ident)
-            };
-            match ty {
-                Type::Path(TypePath { qself, path }) if ident == "krate" && qself.is_none() => {
-                    ret.krate = Some(path);
-                }
-                Type::Path(TypePath { qself, .. }) if ident == "into_iter" && qself.is_none() => {
-                    ret.impl_into_iter = true;
-                }
-                Type::Path(TypePath { qself, .. }) if ident == "iter" && qself.is_none() => {
-                    ret.impl_iter = true;
-                }
-                Type::Path(TypePath { qself, .. }) if ident == "iter_mut" && qself.is_none() => {
-                    ret.impl_iter_mut = true;
-                }
-                Type::Path(TypePath { qself, .. }) if ident == "map" && qself.is_none() => {
-                    ret.impl_map = true;
-                }
-                ty if ident.to_string().len() == 1 => {
-                    ret.map.insert(ident, ty);
-                }
-                _ => {
-                    abort!(ident.span(), "it should be ident of one character")
+                let ident: Ident = input.parse()?;
+                if &ident == "krate" {
+                    input.parse::<Token![=]>()?;
+                    ret.krate = Some(input.parse()?);
+                } else {
+                    return Err(Error::new(ident.span(), "Bad option"));
                 }
             }
-            if let Err(_) = input.parse::<Token![,]>() {
+            if input.parse::<Token![,]>().is_err() {
                 break;
             }
         }
@@ -63,22 +325,131 @@ impl Parse for Arguments {
     }
 }
 
-fn map_type(ty: &mut Type, from_ty: &Type, to_ty: &Type) -> bool {
-    use syn::visit_mut::VisitMut;
-    struct Visitor<'a>(&'a Type, &'a Type, bool);
-    impl<'a> VisitMut for Visitor<'a> {
-        fn visit_type_mut(&mut self, ty: &mut Type) {
-            if &ty == &self.0 {
-                *ty = self.1.clone();
-                self.2 = true;
+trait ImplTarget {
+    fn emit_impl(&self, krate: &Path, tr: &TraitTarget, param_index: usize) -> Result<TokenStream>;
+}
+
+fn get_replacing_ty(generics: &Generics, param_index: usize) -> Type {
+    generics
+        .params
+        .get(param_index)
+        .and_then(|g| {
+            if let GenericParam::Type(TypeParam { ident, .. }) = g {
+                Some(parse_quote!(#ident))
             } else {
-                syn::visit_mut::visit_type_mut(self, ty)
+                None
             }
-        }
+        })
+        .unwrap_or_else(|| {
+            abort!(
+                Span::call_site(),
+                format!("Cannot implement for index {}", param_index)
+            )
+        })
+}
+
+impl ImplTarget for ItemStruct {
+    fn emit_impl(&self, krate: &Path, tr: &TraitTarget, param_index: usize) -> Result<TokenStream> {
+        let self_val = Ident::new("self", Span::call_site());
+        let replacing_ty = get_replacing_ty(&self.generics, param_index);
+        let tys_exprs = self
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(i, field)| {
+                let ty = field.ty.clone();
+                if let Some(ident) = &field.ident {
+                    (ty, parse_quote! {#self_val.#ident})
+                } else {
+                    let i = Index {
+                        index: i as u32,
+                        span: Span::call_site(),
+                    };
+                    (ty, parse_quote! {#self_val.#i})
+                }
+            })
+            .collect::<Vec<_>>();
+        tr.emit(
+            krate,
+            &self.ident,
+            &self.generics,
+            param_index,
+            &replacing_ty,
+            &self_val,
+            &[tys_exprs],
+            |inner| {
+                quote! {
+                    #(#inner)*
+                }
+            },
+        )
     }
-    let mut visitor = Visitor(from_ty, to_ty, false);
-    visitor.visit_type_mut(ty);
-    visitor.2
+}
+
+impl ImplTarget for ItemEnum {
+    fn emit_impl(&self, krate: &Path, tr: &TraitTarget, param_index: usize) -> Result<TokenStream> {
+        let self_val: Ident = parse_quote!(self);
+        let replacing_ty = get_replacing_ty(&self.generics, param_index);
+        let variant_idents = self
+            .variants
+            .iter()
+            .map(|variant| {
+                variant
+                    .fields
+                    .iter()
+                    .enumerate()
+                    .map(|(i, field)| {
+                        field.ident.clone().unwrap_or(Ident::new(
+                            &format!("__parametric_type_id_{}", i),
+                            Span::call_site(),
+                        ))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let variant_items = self
+            .variants
+            .iter()
+            .zip(&variant_idents)
+            .map(|(var, idents)| {
+                var.fields
+                    .iter()
+                    .zip(idents)
+                    .map(|(field, ident)| {
+                        let ty = field.ty.clone();
+                        (ty, parse_quote! {#ident})
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        tr.emit(
+            krate,
+            &self.ident,
+            &self.generics,
+            param_index,
+            &replacing_ty,
+            &self_val,
+            variant_items.as_slice(),
+            |inner| {
+                quote! {
+                    match #self_val {
+                        #(for ((variant, inner), idents) in self
+                            .variants.iter().zip(inner).zip(&variant_idents)
+                        ) {
+                            #{&self.ident}::#{&variant.ident}
+                                #(if let Fields::Named(_) = &variant.fields) {
+                                    { #(#idents),*  }
+                                }
+                                #(if let Fields::Unnamed(_) = &variant.fields) {
+                                    ( #(#idents),* )
+                                }
+                            => { #inner }
+                        }
+                    }
+                }
+            },
+        )
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -131,13 +502,51 @@ impl Generator {
             None
         }
     }
+    fn generate_fold(
+        &self,
+        krate: &Path,
+        replacing_ty: &Type,
+        tys_exprs: &[(Type, Expr)],
+    ) -> Result<TokenStream> {
+        let acc = match self {
+            Generator::MaxLen => quote!(Some(0usize)),
+            Generator::MinLen | Generator::Len => quote!(0usize),
+            Generator::Iter | Generator::IterMut | Generator::IntoIter => {
+                quote!(::core::iter::empty())
+            }
+            Generator::Map(_, _) => todo!(),
+        };
+        let and = self.and();
+        let out = tys_exprs
+            .iter()
+            .filter_map(|(ty, expr)| {
+                match self.generate(krate, replacing_ty, ty, &quote!(#and #expr)) {
+                    Ok(Some(v)) => Some(Ok(v)),
+                    Ok(None) => None,
+                    Err(e) => Some(Err(e)),
+                }
+            })
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .fold(acc, |acc, out| match self {
+                Generator::MinLen | Generator::Len => quote! {#acc + #out},
+                Generator::MaxLen => {
+                    quote! {if let (Some(l), Some(r)) = (#acc, #out) { Some(l + r) } else { None }}
+                }
+                Generator::Iter | Generator::IterMut | Generator::IntoIter => {
+                    quote! {#acc.chain(#out)}
+                }
+                Generator::Map(_map_fn, _) => todo!(),
+            });
+        Ok(out)
+    }
     fn generate(
         &self,
         krate: &Path,
         replacing_ty: &Type,
         ty: &Type,
         expr: &TokenStream,
-    ) -> std::result::Result<Option<TokenStream>, Type> {
+    ) -> Result<Option<TokenStream>> {
         if let Some(out) = self.generate_if_pure(replacing_ty, ty, expr) {
             return Ok(Some(out));
         }
@@ -156,7 +565,12 @@ impl Generator {
                             args,
                             ..
                         }) => args.iter().collect(),
-                        PathArguments::Parenthesized(_) => return Err(ty.clone()),
+                        PathArguments::Parenthesized(_) => {
+                            return Err(Error::new(
+                                ty.span(),
+                                "Cannot infer Parametrized of closures",
+                            ))
+                        }
                     };
                     generic_args
                         .iter()
@@ -183,21 +597,29 @@ impl Generator {
                 | (Some(_), Self::IterMut) => {
                     return self.generate(krate, replacing_ty, elem.as_ref(), expr);
                 }
-                _ => return Err(ty.clone()),
+                _ => {
+                    return Err(Error::new(
+                        ty.span(),
+                        format!("Cannot implement {:?} over this reference", self),
+                    ))
+                }
             },
             Type::Tuple(TypeTuple { elems, .. }) => elems.iter().enumerate().collect(),
             Type::Never(_) => return Ok(None),
-            _ => return Err(ty.clone()),
+            _ => {
+                return Err(Error::new(
+                    ty.span(),
+                    "Cannot infer Parametrized for this type",
+                ))
+            }
         };
         let map_arg = quote!(__parametric_type_arg);
-        if let Generator::Map(map_fn, map_param) = self {
+        if let Generator::Map(_map_fn, _map_param) = self {
             let mut ret = quote! {#expr};
             for (index, inner_ty) in indexed_ty_args.into_iter() {
                 if let Some(generated) = self.generate(krate, replacing_ty, inner_ty, &map_arg)? {
                     ret = quote! {
-                        <
-                            _ as #krate::type_argument::MapOfNthArgument<#index>
-                        >::map_of_param(#ret, |#map_arg| {#generated})
+                        < _ as #krate::ParametrizedMap<#index, _>>::map_of_param(#ret, |#map_arg| {#generated})
                     };
                 }
             }
@@ -217,7 +639,7 @@ impl Generator {
                 Ok(Some(
                     indexed.into_iter().fold(quote!(0usize), |acc, (idx, inner)| {
                         quote! {
-                            #acc + <#ty as #krate::type_argument::IntoIteratorOfNthArgument<#idx>>::MIN_LEN * #inner
+                            #acc + <#ty as #krate::Parametrized<#idx>>::MIN_LEN * #inner
                         }
                     })
                 ))
@@ -226,7 +648,7 @@ impl Generator {
                 Ok(Some(
                     indexed.into_iter().fold(quote!(::core::option::Option::Some(0usize)), |acc, (idx, inner)| {
                         quote! {
-                            if let (Some(l), Some(m), Some(r)) = (#acc, <#ty as #krate::type_argument::IntoIteratorOfNthArgument<#idx>>::MAX_LEN, #inner) {
+                            if let (Some(l), Some(m), Some(r)) = (#acc, <#ty as #krate::Parametrized<#idx>>::MAX_LEN, #inner) {
                                 Some(l + m * r)
                             } else { None }
                         }
@@ -237,11 +659,10 @@ impl Generator {
                 Ok(Some(indexed.into_iter().fold(quote!(0usize), |acc, (idx, inner)| {
                     quote! {
                         #acc + <
-                            & #ty as #krate::type_argument::IntoIteratorOfNthArgument<#idx>
-                        >::into_iter_of_arg(#expr)
+                            #ty as #krate::ParametrizedIter<#idx>
+                        >::param_iter(#expr)
                             .map(|#map_arg| #inner)
                             .sum::<::core::primitive::usize>()
-
                     }
                 })))
             }
@@ -249,498 +670,58 @@ impl Generator {
                 Ok(Some(indexed.into_iter().fold(quote!(::core::iter::empty()), |acc, (idx, inner)| {
                     let and = self.and();
                     quote! {
-                        #acc.chain(
-                            <#and #ty as #krate::type_argument::IntoIteratorOfNthArgument<#idx>>::into_iter_of_arg(#expr)
+                        #acc.chain( // TODO! 
+                            <#ty as #krate::ParametrizedIter<#idx>>::into_iter_of_arg(#expr)
                                 .map(|#map_arg| #inner)
                                 .flatten()
                         )
                     }
                 })))
             }
-            Generator::Map(map_fn, map_param) if indexed.len() == 1 => {
+            Generator::Map(map_fn, _map_param) if indexed.len() == 1 => {
                 Ok(Some(quote! {
                     <#ty as #krate::type_argument::MapOfNthArgument<#{&indexed[0].0}, _>>::map_of_param(#expr, |#map_arg| #map_fn(#{&indexed[0].1}))
                 }))
             }
-            _ => Err(ty.clone())
+            _ => Err(Error::new(ty.span(), "general error"))
         }
     }
 }
 
-fn inner(arg: Arguments, input: Item) -> TokenStream {
-    let krate = arg.krate.unwrap_or(parse_quote!(::parametric_type));
-    fn generate_with_generator(
-        krate: &Path,
-        generators: &[Generator],
-        replacing_ty: &Type,
-        items: &[(Type, TokenStream)],
-    ) -> std::result::Result<Vec<TokenStream>, Type> {
-        generators
-            .iter()
-            .map(|generator| {
-                let acc = match generator {
-                    Generator::MaxLen => quote!(Some(0usize)),
-                    Generator::MinLen | Generator::Len => quote!(0usize),
-                    Generator::Iter | Generator::IterMut | Generator::IntoIter => {
-                        quote!(::core::iter::empty())
-                    }
-                    Generator::Map(_, _) => todo!(),
-                };
-                let and = generator.and();
-                Ok(items
-                    .iter()
-                    .filter_map(|(ty, expr)| {
-                        match generator.generate(krate, replacing_ty, ty, &quote!(#and #expr)) {
-                            Ok(Some(v)) => Some(Ok(v)),
-                            Ok(None) => None,
-                            Err(e) => Some(Err(e)),
-                        }
-                    })
-                    .collect::<std::result::Result<Vec<_>, _>>()?
-                    .into_iter()
-                    .fold(acc, |acc, out| match generator {
-                        Generator::MinLen | Generator::Len => quote! {#acc + #out},
-                        Generator::MaxLen => quote! {if let (Some(l), Some(r)) = (#acc, #out) { Some(l + r) } else { None }},
-                        Generator::Iter | Generator::IterMut | Generator::IntoIter => {
-                            quote! {#acc.chain(#out)}
-                        }
-                        Generator::Map(map_fn, _) => todo!(),
-                    }))
-            })
-            .collect()
-    }
+fn inner_target<T: ImplTarget>(target: &T, arg: Arguments) -> TokenStream {
+    let krate = arg.krate.unwrap_or(parse_quote!(::parametrized));
     let mut out = quote!();
-    match &input {
-        Item::Enum(ItemEnum {
-            generics,
-            ident,
-            variants,
-            ..
-        }) => {
-            let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
-            let impl_generics: AngleBracketedGenericArguments =
-                parse2(impl_generics.into_token_stream()).unwrap();
-            for (i, par) in generics.params.iter().enumerate().filter_map(|(i, param)| {
-                if let GenericParam::Type(TypeParam { ident, .. }) = param {
-                    Some((i, ident))
-                } else {
-                    None
-                }
-            }) {
-                let variant_idents = variants.iter().map(|variant| variant.fields.iter().enumerate().map(|(i, field)| { field.ident.clone().unwrap_or(Ident::new(&format!("__parametric_type_id_{}", i), Span::call_site())) }).collect::<Vec<_>>()).collect::<Vec<_>>();
-                let variant_items = variants
-                    .iter()
-                    .zip(&variant_idents)
-                    .map(|(var, idents)| {
-                        var.fields
-                            .iter()
-                            .zip(idents)
-                            .enumerate()
-                            .map(|(i, (field, ident))| {
-                                let ty = field.ty.clone();
-                                    (ty, quote!{#ident})
-                            })
-                            .collect::<Vec<_>>()
-                    })
-                    .collect::<Vec<_>>();
-                fn squash_minlens(outs: &[TokenStream]) -> TokenStream {
-                    if outs.len() == 0 {
-                        abort!(Span::call_site(), "needs one or more variants");
-                    }
-                    let acc = outs[outs.len() - 1].clone();
-                    let out = outs[0..(outs.len() - 2)]
-                        .iter()
-                        .rev()
-                        .fold(acc, |acc, out| quote! {__parametric_type_min(#out, #acc)});
-                    quote! {
-                        {
-                            const fn __parametric_type_min(a: usize, b: usize) -> usize {
-                                if a < b { a } else { b }
-                            }
-                            #out
-                        }
-                    }
-                }
-                fn squash_maxlens(outs: &[TokenStream]) -> TokenStream {
-                    if outs.len() == 0 {
-                        abort!(Span::call_site(), "needs one or more variants");
-                    }
-                    let acc = outs[outs.len() - 1].clone();
-                    let out = outs[0..(outs.len() - 2)]
-                        .iter()
-                        .rev()
-                        .fold(acc, |acc, out| quote! {__parametric_type_max(#out, #acc)});
-                    quote! {
-                        {
-                            const fn __parametric_type_max(a: Option<usize>, b: Option<usize>) -> Option<usize> {
-                                match (a, b) {
-                                    (Some(a), Some(b)) => if a > b { Some(a) } else { Some(b) }
-                                    _ => None,
-                                }
-                            }
-                            #out
-                        }
-                    }
-                }
-                if arg.impl_into_iter {
-                    let [out_minlens, out_maxlens, out_iters, out_lens] = variant_items
-                        .iter()
-                        .map(|items| {
-                            generate_with_generator(
-                                &krate,
-                                &[
-                                    Generator::MinLen,
-                                    Generator::MaxLen,
-                                    Generator::IntoIter,
-                                    Generator::Len,
-                                ],
-                                &parse_quote!(#par),
-                                items.as_ref(),
-                            )
-                        })
-                        .collect::<std::result::Result<Vec<_>, _>>()
-                        .unwrap_or_else(|e| {
-                            abort!(e.span(), "Cannot implement IntoIteratorOfNthArgument")
-                        })
-                        .into_iter()
-                        .fold([vec![], vec![], vec![], vec![]], |mut acc, outs| {
-                            for (lhs, rhs) in acc.iter_mut().zip(outs) {
-                                lhs.push(rhs);
-                            }
-                            acc
-                        });
-                    let out_minlen = squash_minlens(out_minlens.as_slice());
-                    let out_maxlen = squash_maxlens(out_maxlens.as_slice());
-                    out.extend(quote! {
-                        #[#krate::_imp::sumtype]
-                            impl #impl_generics #krate::type_argument::IntoIteratorOfNthArgument<#i> for #ident #ty_generics #where_clause {
-                                type Item = #par;
-                                const MIN_LEN: usize = #out_minlen;
-                                const MAX_LEN: Option<usize> = #out_maxlen;
-                                fn into_iter_of_arg(self) -> impl ::core::iter::Iterator<Item = Self::Item> { 
-                                    match self {
-                                        #(for ((variant, out), idents) in variants.iter().zip(out_iters).zip(&variant_idents)) {
-                                            #ident::#{&variant.ident}
-                                            #(if let Fields::Named(_) = &variant.fields) {
-                                                { #(#idents),*  }
-                                            }
-                                            #(if let Fields::Unnamed(_) = &variant.fields) {
-                                                ( #(#idents),* )
-                                            }
-                                            => sumtype!(#out),
-                                        }
-                                    }
-                                }
-                                fn len_of_arg(&self) -> usize { 
-                                    match self {
-                                        #(for ((variant, out), idents) in variants.iter().zip(out_lens).zip(&variant_idents)) {
-                                            #ident::#{&variant.ident}
-                                            #(if let Fields::Named(_) = &variant.fields) {
-                                                { #(#idents),*  }
-                                            }
-                                            #(if let Fields::Unnamed(_) = &variant.fields) {
-                                                ( #(#idents),* )
-                                            }
-                                            => #out,
-                                        }
-                                    }
-                                }
-                            }
-                        });
-                }
-                if arg.impl_iter {
-                    let [out_minlens, out_maxlens, out_iters, out_lens] = variant_items
-                        .iter()
-                        .map(|items| {
-                            generate_with_generator(
-                                &krate,
-                                &[
-                                    Generator::MinLen,
-                                    Generator::MaxLen,
-                                    Generator::Iter,
-                                    Generator::Len,
-                                ],
-                                &parse_quote!(#par),
-                                items.iter().map(|(a,b)| (a.clone(),quote!{*#b})).collect::<Vec<_>>().as_slice(),
-                            )
-                        })
-                        .collect::<std::result::Result<Vec<_>, _>>()
-                        .unwrap_or_else(|e| {
-                            abort!(e.span(), "Cannot implement IntoIteratorOfNthArgument")
-                        })
-                        .into_iter()
-                        .fold([vec![], vec![], vec![], vec![]], |mut acc, outs| {
-                            for (lhs, rhs) in acc.iter_mut().zip(outs) {
-                                lhs.push(rhs);
-                            }
-                            acc
-                        });
-                    let out_minlen = squash_minlens(out_minlens.as_slice());
-                    let out_maxlen = squash_maxlens(out_maxlens.as_slice());
-                    out.extend(quote! {
-                            #[#krate::_imp::sumtype]
-                            impl<
-                                '__parametric_type_lt
-                                #(for g in &impl_generics.args){,#g}
-                            > #krate::type_argument::IntoIteratorOfNthArgument<#i> for &'__parametric_type_lt #ident #ty_generics #where_clause
-                             {
-                                type Item = &'__parametric_type_lt #par;
-                                const MIN_LEN: usize = #out_minlen;
-                                const MAX_LEN: Option<usize> = #out_maxlen;
-                                fn into_iter_of_arg(self) -> impl ::core::iter::Iterator<Item = Self::Item> { 
-                                    match self {
-                                        #(for ((variant, out), idents) in variants.iter().zip(out_iters).zip(&variant_idents)) {
-                                            #ident::#{&variant.ident}
-                                            #(if let Fields::Named(_) = &variant.fields) {
-                                                { #(#idents),*  }
-                                            }
-                                            #(if let Fields::Unnamed(_) = &variant.fields) {
-                                                ( #(#idents),* )
-                                            }
-                                            => sumtype!(#out),
-                                        }
-                                    }
-                                }
-                                fn len_of_arg(&self) -> usize { 
-                                    match self {
-                                        #(for ((variant, out), idents) in variants.iter().zip(out_lens).zip(&variant_idents)) {
-                                            #ident::#{&variant.ident}
-                                            #(if let Fields::Named(_) = &variant.fields) {
-                                                { #(#idents),*  }
-                                            }
-                                            #(if let Fields::Unnamed(_) = &variant.fields) {
-                                                ( #(#idents),* )
-                                            }
-                                            => #out,
-                                        }
-                                    }
-                                }
-                            }
-                        });
-                }
-                if arg.impl_iter_mut {
-                    let [out_minlens, out_maxlens, out_iters, out_lens] = variant_items
-                        .iter()
-                        .map(|items| {
-                            generate_with_generator(
-                                &krate,
-                                &[
-                                    Generator::MinLen,
-                                    Generator::MaxLen,
-                                    Generator::IterMut,
-                                    Generator::Len,
-                                ],
-                                &parse_quote!(#par),
-                                items.iter().map(|(a,b)| (a.clone(),quote!{*#b})).collect::<Vec<_>>().as_slice(),
-                            )
-                        })
-                        .collect::<std::result::Result<Vec<_>, _>>()
-                        .unwrap_or_else(|e| {
-                            abort!(e.span(), "Cannot implement IntoIteratorOfNthArgument")
-                        })
-                        .into_iter()
-                        .fold([vec![], vec![], vec![], vec![]], |mut acc, outs| {
-                            for (lhs, rhs) in acc.iter_mut().zip(outs) {
-                                lhs.push(rhs);
-                            }
-                            acc
-                        });
-                    let out_minlen = squash_minlens(out_minlens.as_slice());
-                    let out_maxlen = squash_maxlens(out_maxlens.as_slice());
-                    out.extend(quote! {
-                            #[#krate::_imp::sumtype]
-                            impl<
-                                '__parametric_type_lt
-                                #(for g in &impl_generics.args){,#g}
-                            > #krate::type_argument::IntoIteratorOfNthArgument<#i> for &'__parametric_type_lt mut #ident #ty_generics #where_clause
-                            {
-                                type Item = &'__parametric_type_lt mut #par;
-                                const MIN_LEN: usize = #out_minlen;
-                                const MAX_LEN: Option<usize> = #out_maxlen;
-                                fn into_iter_of_arg(self) -> impl ::core::iter::Iterator<Item = Self::Item> { 
-                                    match self {
-                                        #(for ((variant, out), idents) in variants.iter().zip(out_iters).zip(&variant_idents)) {
-                                            #ident::#{&variant.ident}
-                                            #(if let Fields::Named(_) = &variant.fields) {
-                                                { #(#idents),*  }
-                                            }
-                                            #(if let Fields::Unnamed(_) = &variant.fields) {
-                                                ( #(#idents),* )
-                                            }
-                                            => sumtype!(#out),
-                                        }
-                                    }
-                                }
-                                fn len_of_arg(&self) -> usize { 
-                                    match self {
-                                        #(for ((variant, out), idents) in variants.iter().zip(out_lens).zip(&variant_idents)) {
-                                            #ident::#{&variant.ident}
-                                            #(if let Fields::Named(_) = &variant.fields) {
-                                                { #(#idents),*  }
-                                            }
-                                            #(if let Fields::Unnamed(_) = &variant.fields) {
-                                                ( #(#idents),* )
-                                            }
-                                            => #out,
-                                        }
-                                    }
-                                }
-                            }
-                        });
-                }
-            }
-            quote! {
-                #input
-                #out
-            }
+    for (param_index, impl_traits) in &arg.trait_impls {
+        let impl_traits = TraitTarget::make_enough(impl_traits.clone());
+        for impl_trait in &impl_traits {
+            let ret = target
+                .emit_impl(&krate, impl_trait, *param_index)
+                .unwrap_or_else(|e| {
+                    abort!(
+                        e.span(),
+                        format!(
+                            "Cannot implement {:?} for parameter {}: {}",
+                            &impl_trait, param_index, e
+                        )
+                    )
+                });
+            out.extend(ret);
         }
-        Item::Struct(item_struct) => {
-            let (impl_generics, ty_generics, where_clause) = item_struct.generics.split_for_impl();
-            let impl_generics: AngleBracketedGenericArguments =
-                parse2(impl_generics.into_token_stream()).unwrap();
-            for (i, par) in
-                item_struct
-                    .generics
-                    .params
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, param)| {
-                        if let GenericParam::Type(TypeParam { ident, .. }) = param {
-                            Some((i, ident))
-                        } else {
-                            None
-                        }
-                    })
-            {
-                let items: Vec<_> = item_struct
-                    .fields
-                    .iter()
-                    .enumerate()
-                    .map(|(i, field)| {
-                        let ty = field.ty.clone();
-                        if let Some(ident) = &field.ident {
-                            (ty, quote! {self.#ident})
-                        } else {
-                            let i = Index {
-                                index: i as u32,
-                                span: Span::call_site(),
-                            };
-                            (ty, quote! {self.#i})
-                        }
-                    })
-                    .collect();
-                if arg.impl_into_iter {
-                    if let [out_minlen, out_maxlen, out_iter, out_len] = generate_with_generator(
-                        &krate,
-                        &[
-                            Generator::MinLen,
-                            Generator::MaxLen,
-                            Generator::IntoIter,
-                            Generator::Len,
-                        ],
-                        &parse_quote!(#par),
-                        items.as_ref(),
-                    )
-                    .unwrap_or_else(|e| {
-                        abort!(e.span(), "Cannot implement IntoIteratorOfNthArgument")
-                    })
-                    .as_slice()
-                    {
-                        out.extend(quote! {
-                            impl #impl_generics #krate::type_argument::IntoIteratorOfNthArgument<#i> for #{&item_struct.ident} #ty_generics #where_clause {
-                                type Item = #par;
-                                const MIN_LEN: usize = #out_minlen;
-                                const MAX_LEN: Option<usize> = #out_maxlen;
-                                fn into_iter_of_arg(self) -> impl ::core::iter::Iterator<Item = Self::Item> { #out_iter }
-                                fn len_of_arg(&self) -> usize { #out_len }
-                            }
-                        })
-                    } else {
-                        unreachable!()
-                    }
-                }
-                if arg.impl_iter {
-                    if let [out_minlen, out_maxlen, out_iter, out_len] = generate_with_generator(
-                        &krate,
-                        &[
-                            Generator::MinLen,
-                            Generator::MaxLen,
-                            Generator::Iter,
-                            Generator::Len,
-                        ],
-                        &parse_quote!(#par),
-                        items.as_ref(),
-                    )
-                    .unwrap_or_else(|e| {
-                        abort!(e.span(), "Cannot implement IntoIteratorOfNthArgument")
-                    })
-                    .as_slice()
-                    {
-                        out.extend(quote! {
-                            impl<
-                                '__parametric_type_lt
-                                #(for g in &impl_generics.args){,#g}
-                            > #krate::type_argument::IntoIteratorOfNthArgument<#i> for &'__parametric_type_lt #{&item_struct.ident} #ty_generics #where_clause {
-                                type Item = &'__parametric_type_lt #par;
-                                const MIN_LEN: usize = #out_minlen;
-                                const MAX_LEN: Option<usize> = #out_maxlen;
-                                fn into_iter_of_arg(self) -> impl ::core::iter::Iterator<Item = Self::Item> { #out_iter }
-                                fn len_of_arg(&self) -> usize { #out_len }
-                            }
-                        })
-                    } else {
-                        unreachable!()
-                    }
-                }
-                if arg.impl_iter_mut {
-                    if let [out_minlen, out_maxlen, out_iter, out_len] = generate_with_generator(
-                        &krate,
-                        &[
-                            Generator::MinLen,
-                            Generator::MaxLen,
-                            Generator::IterMut,
-                            Generator::Len,
-                        ],
-                        &parse_quote!(#par),
-                        items.as_ref(),
-                    )
-                    .unwrap_or_else(|e| {
-                        abort!(e.span(), "Cannot implement IntoIteratorOfNthArgument")
-                    })
-                    .as_slice()
-                    {
-                        out.extend(quote! {
-                            impl<
-                                '__parametric_type_lt
-                                #(for g in &impl_generics.args){,#g}
-                            > #krate::type_argument::IntoIteratorOfNthArgument<#i> for &'__parametric_type_lt mut #{&item_struct.ident} #ty_generics #where_clause {
-                                type Item = &'__parametric_type_lt mut #par;
-                                const MIN_LEN: usize = #out_minlen;
-                                const MAX_LEN: Option<usize> = #out_maxlen;
-                                fn into_iter_of_arg(self) -> impl ::core::iter::Iterator<Item = Self::Item> { #out_iter }
-                                fn len_of_arg(&self) -> usize { #out_len }
-                            }
-                        })
-                    } else {
-                        unreachable!()
-                    }
-                }
-            }
-            quote! {
-                #input
-                #out
-            }
-        }
-        _ => abort!(
-            input.span(),
-            "Unsuported item; Only supported enums or structs"
-        ),
+    }
+    out
+}
+
+fn inner(arg: Arguments, input: Item) -> TokenStream {
+    match input {
+        Item::Enum(item_enum) => inner_target(&item_enum, arg),
+        Item::Struct(item_struct) => inner_target(&item_struct, arg),
+        _ => abort!(input.span(), "Bad item"),
     }
 }
 
 #[proc_macro_error]
 #[proc_macro_attribute]
-pub fn parametric_type(attr: TokenStream1, input: TokenStream1) -> TokenStream1 {
+pub fn parametrized(attr: TokenStream1, input: TokenStream1) -> TokenStream1 {
     inner(
         parse(attr).unwrap_or_else(|e| abort!(e.span(), &format!("{}", e))),
         parse_macro_input!(input as Item),

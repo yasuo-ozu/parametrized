@@ -6,6 +6,9 @@ edition = "2021"
 [lib]
 path = "lib.rs"
 
+[features]
+large-tuples = []
+
 [dependencies]
 parametrized-macro = { version = "0.1.0", path = "macro" }
 sumtype = "0.1.1"

@@ -6,9 +6,7 @@ pub trait Parametrized<const PARAM: usize> {
     const MIN_LEN: usize;
     const MAX_LEN: Option<usize>;
     fn param_len(&self) -> usize;
-}
 
-pub trait ParametrizedIter<const PARAM: usize>: Parametrized<PARAM> {
     type Iter<'a>: Iterator<Item = &'a Self::Item>
     where
         (Self, Self::Item): 'a;
@@ -18,7 +16,7 @@ pub trait ParametrizedIter<const PARAM: usize>: Parametrized<PARAM> {
         Self::Item: 'a;
 }
 
-pub trait ParametrizedIterMut<const PARAM: usize>: ParametrizedIter<PARAM> {
+pub trait ParametrizedIterMut<const PARAM: usize>: Parametrized<PARAM> {
     type IterMut<'a>: Iterator<Item = &'a mut Self::Item>
     where
         (Self, Self::Item): 'a;
@@ -27,7 +25,7 @@ pub trait ParametrizedIterMut<const PARAM: usize>: ParametrizedIter<PARAM> {
         Self::Item: 'a;
 }
 
-pub trait ParametrizedIntoIter<const PARAM: usize>: ParametrizedIter<PARAM> + Sized {
+pub trait ParametrizedIntoIter<const PARAM: usize>: Parametrized<PARAM> + Sized {
     type IntoIter: Iterator<Item = Self::Item>
     where
         Self::Item: Sized;
@@ -53,6 +51,16 @@ where
     fn param_len(&self) -> usize {
         <T as Parametrized<PARAM>>::param_len(self)
     }
+    type Iter<'b> = <T as Parametrized<PARAM>>::Iter<'b>
+    where
+        (Self, Self::Item): 'b;
+
+    fn param_iter<'b>(&'b self) -> Self::Iter<'b>
+    where
+        Self::Item: 'b,
+    {
+        <T as Parametrized<PARAM>>::param_iter(self)
+    }
 }
 
 impl<'a, const PARAM: usize, T> Parametrized<PARAM> for &'a mut T
@@ -65,13 +73,7 @@ where
     fn param_len(&self) -> usize {
         <T as Parametrized<PARAM>>::param_len(self)
     }
-}
-
-impl<'a, const PARAM: usize, T> ParametrizedIter<PARAM> for &'a T
-where
-    T: ParametrizedIter<PARAM>,
-{
-    type Iter<'b> = <T as ParametrizedIter<PARAM>>::Iter<'b>
+    type Iter<'b> = <T as Parametrized<PARAM>>::Iter<'b>
     where
         (Self, Self::Item): 'b;
 
@@ -79,23 +81,7 @@ where
     where
         Self::Item: 'b,
     {
-        <T as ParametrizedIter<PARAM>>::param_iter(self)
-    }
-}
-
-impl<'a, const PARAM: usize, T> ParametrizedIter<PARAM> for &'a mut T
-where
-    T: ParametrizedIter<PARAM>,
-{
-    type Iter<'b> = <T as ParametrizedIter<PARAM>>::Iter<'b>
-    where
-        (Self, Self::Item): 'b;
-
-    fn param_iter<'b>(&'b self) -> Self::Iter<'b>
-    where
-        Self::Item: 'b,
-    {
-        <T as ParametrizedIter<PARAM>>::param_iter(self)
+        <T as Parametrized<PARAM>>::param_iter(self)
     }
 }
 
@@ -146,10 +132,6 @@ macro_rules! impl_for_tuple {
             fn param_len(&self) -> usize {
                 1
             }
-        }
-        impl<$($params0,)* $param $(,$params1)*> ParametrizedIter<{impl_for_tuple!(@count $($params0),*)}>
-        for ($($params0,)* $param, $($params1),*)
-        {
             type Iter<'a> = ::core::iter::Once<&'a Self::Item>
             where
                 (Self, Self::Item): 'a;
@@ -213,88 +195,89 @@ macro_rules! impl_for_tuple {
             }
         }
     };
-    () => {
-        impl_for_tuple!([] T []);
-        impl_for_tuple!([] T [R0]);
-        impl_for_tuple!([] T [R0, R1]);
-        impl_for_tuple!([] T [R0, R1, R2]);
-        impl_for_tuple!([] T [R0, R1, R2, R3]);
-        impl_for_tuple!([] T [R0, R1, R2, R3, R4]);
-        impl_for_tuple!([] T [R0, R1, R2, R3, R4, R5]);
-        impl_for_tuple!([] T [R0, R1, R2, R3, R4, R5, R6]);
-        impl_for_tuple!([] T [R0, R1, R2, R3, R4, R5, R6, R7]);
-        impl_for_tuple!([] T [R0, R1, R2, R3, R4, R5, R6, R7, R8]);
-        impl_for_tuple!([] T [R0, R1, R2, R3, R4, R5, R6, R7, R8, R9]);
-        impl_for_tuple!([] T [R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10]);
-        impl_for_tuple!([L0] T []);
-        impl_for_tuple!([L0] T [R0]);
-        impl_for_tuple!([L0] T [R0, R1]);
-        impl_for_tuple!([L0] T [R0, R1, R2]);
-        impl_for_tuple!([L0] T [R0, R1, R2, R3]);
-        impl_for_tuple!([L0] T [R0, R1, R2, R3, R4]);
-        impl_for_tuple!([L0] T [R0, R1, R2, R3, R4, R5]);
-        impl_for_tuple!([L0] T [R0, R1, R2, R3, R4, R5, R6]);
-        impl_for_tuple!([L0] T [R0, R1, R2, R3, R4, R5, R6, R7]);
-        impl_for_tuple!([L0] T [R0, R1, R2, R3, R4, R5, R6, R7, R8]);
-        impl_for_tuple!([L0] T [R0, R1, R2, R3, R4, R5, R6, R7, R8, R9]);
-        impl_for_tuple!([L0, L1] T []);
-        impl_for_tuple!([L0, L1] T [R0]);
-        impl_for_tuple!([L0, L1] T [R0, R1]);
-        impl_for_tuple!([L0, L1] T [R0, R1, R2]);
-        impl_for_tuple!([L0, L1] T [R0, R1, R2, R3]);
-        impl_for_tuple!([L0, L1] T [R0, R1, R2, R3, R4]);
-        impl_for_tuple!([L0, L1] T [R0, R1, R2, R3, R4, R5]);
-        impl_for_tuple!([L0, L1] T [R0, R1, R2, R3, R4, R5, R6]);
-        impl_for_tuple!([L0, L1] T [R0, R1, R2, R3, R4, R5, R6, R7]);
-        impl_for_tuple!([L0, L1] T [R0, R1, R2, R3, R4, R5, R6, R7, R8]);
-        impl_for_tuple!([L0, L1, L2] T []);
-        impl_for_tuple!([L0, L1, L2] T [R0]);
-        impl_for_tuple!([L0, L1, L2] T [R0, R1]);
-        impl_for_tuple!([L0, L1, L2] T [R0, R1, R2]);
-        impl_for_tuple!([L0, L1, L2] T [R0, R1, R2, R3]);
-        impl_for_tuple!([L0, L1, L2] T [R0, R1, R2, R3, R4]);
-        impl_for_tuple!([L0, L1, L2] T [R0, R1, R2, R3, R4, R5]);
-        impl_for_tuple!([L0, L1, L2] T [R0, R1, R2, R3, R4, R5, R6]);
-        impl_for_tuple!([L0, L1, L2] T [R0, R1, R2, R3, R4, R5, R6, R7]);
-        impl_for_tuple!([L0, L1, L2, L3] T []);
-        impl_for_tuple!([L0, L1, L2, L3] T [R0]);
-        impl_for_tuple!([L0, L1, L2, L3] T [R0, R1]);
-        impl_for_tuple!([L0, L1, L2, L3] T [R0, R1, R2]);
-        impl_for_tuple!([L0, L1, L2, L3] T [R0, R1, R2, R3]);
-        impl_for_tuple!([L0, L1, L2, L3] T [R0, R1, R2, R3, R4]);
-        impl_for_tuple!([L0, L1, L2, L3] T [R0, R1, R2, R3, R4, R5]);
-        impl_for_tuple!([L0, L1, L2, L3] T [R0, R1, R2, R3, R4, R5, R6]);
-        impl_for_tuple!([L0, L1, L2, L3, L4] T []);
-        impl_for_tuple!([L0, L1, L2, L3, L4] T [R0]);
-        impl_for_tuple!([L0, L1, L2, L3, L4] T [R0, R1]);
-        impl_for_tuple!([L0, L1, L2, L3, L4] T [R0, R1, R2]);
-        impl_for_tuple!([L0, L1, L2, L3, L4] T [R0, R1, R2, R3]);
-        impl_for_tuple!([L0, L1, L2, L3, L4] T [R0, R1, R2, R3, R4]);
-        impl_for_tuple!([L0, L1, L2, L3, L4] T [R0, R1, R2, R3, R4, R5]);
-        impl_for_tuple!([L0, L1, L2, L3, L4, L5] T []);
-        impl_for_tuple!([L0, L1, L2, L3, L4, L5] T [R0]);
-        impl_for_tuple!([L0, L1, L2, L3, L4, L5] T [R0, R1]);
-        impl_for_tuple!([L0, L1, L2, L3, L4, L5] T [R0, R1, R2]);
-        impl_for_tuple!([L0, L1, L2, L3, L4, L5] T [R0, R1, R2, R3]);
-        impl_for_tuple!([L0, L1, L2, L3, L4, L5] T [R0, R1, R2, R3, R4]);
-        impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6] T []);
-        impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6] T [R0]);
-        impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6] T [R0, R1]);
-        impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6] T [R0, R1, R2]);
-        impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6] T [R0, R1, R2, R3]);
-        impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6, L7] T []);
-        impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6, L7] T [R0]);
-        impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6, L7] T [R0, R1]);
-        impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6, L7] T [R0, R1, R2]);
-        impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6, L7, L8] T []);
-        impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6, L7, L8] T [R0]);
-        impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6, L7, L8] T [R0, R1]);
-        impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6, L7, L8, L9] T []);
-        impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6, L7, L8, L9] T [R0]);
-        impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6, L7, L8, L9, L10] T []);
-    };
 }
-//impl_for_tuple!();
+impl_for_tuple!([] T []);
+impl_for_tuple!([] T [R0]);
+impl_for_tuple!([] T [R0, R1]);
+impl_for_tuple!([L0] T []);
+impl_for_tuple!([L0] T [R0]);
+impl_for_tuple!([L0, L1] T []);
+
+#[cfg(feature = "large-tuples")]
+mod large_tuples {
+    impl_for_tuple!([] T [R0, R1, R2]);
+    impl_for_tuple!([] T [R0, R1, R2, R3]);
+    impl_for_tuple!([] T [R0, R1, R2, R3, R4]);
+    impl_for_tuple!([] T [R0, R1, R2, R3, R4, R5]);
+    impl_for_tuple!([] T [R0, R1, R2, R3, R4, R5, R6]);
+    impl_for_tuple!([] T [R0, R1, R2, R3, R4, R5, R6, R7]);
+    impl_for_tuple!([] T [R0, R1, R2, R3, R4, R5, R6, R7, R8]);
+    impl_for_tuple!([] T [R0, R1, R2, R3, R4, R5, R6, R7, R8, R9]);
+    impl_for_tuple!([] T [R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10]);
+    impl_for_tuple!([L0] T [R0, R1]);
+    impl_for_tuple!([L0] T [R0, R1, R2]);
+    impl_for_tuple!([L0] T [R0, R1, R2, R3]);
+    impl_for_tuple!([L0] T [R0, R1, R2, R3, R4]);
+    impl_for_tuple!([L0] T [R0, R1, R2, R3, R4, R5]);
+    impl_for_tuple!([L0] T [R0, R1, R2, R3, R4, R5, R6]);
+    impl_for_tuple!([L0] T [R0, R1, R2, R3, R4, R5, R6, R7]);
+    impl_for_tuple!([L0] T [R0, R1, R2, R3, R4, R5, R6, R7, R8]);
+    impl_for_tuple!([L0] T [R0, R1, R2, R3, R4, R5, R6, R7, R8, R9]);
+    impl_for_tuple!([L0, L1] T [R0]);
+    impl_for_tuple!([L0, L1] T [R0, R1]);
+    impl_for_tuple!([L0, L1] T [R0, R1, R2]);
+    impl_for_tuple!([L0, L1] T [R0, R1, R2, R3]);
+    impl_for_tuple!([L0, L1] T [R0, R1, R2, R3, R4]);
+    impl_for_tuple!([L0, L1] T [R0, R1, R2, R3, R4, R5]);
+    impl_for_tuple!([L0, L1] T [R0, R1, R2, R3, R4, R5, R6]);
+    impl_for_tuple!([L0, L1] T [R0, R1, R2, R3, R4, R5, R6, R7]);
+    impl_for_tuple!([L0, L1] T [R0, R1, R2, R3, R4, R5, R6, R7, R8]);
+    impl_for_tuple!([L0, L1, L2] T []);
+    impl_for_tuple!([L0, L1, L2] T [R0]);
+    impl_for_tuple!([L0, L1, L2] T [R0, R1]);
+    impl_for_tuple!([L0, L1, L2] T [R0, R1, R2]);
+    impl_for_tuple!([L0, L1, L2] T [R0, R1, R2, R3]);
+    impl_for_tuple!([L0, L1, L2] T [R0, R1, R2, R3, R4]);
+    impl_for_tuple!([L0, L1, L2] T [R0, R1, R2, R3, R4, R5]);
+    impl_for_tuple!([L0, L1, L2] T [R0, R1, R2, R3, R4, R5, R6]);
+    impl_for_tuple!([L0, L1, L2] T [R0, R1, R2, R3, R4, R5, R6, R7]);
+    impl_for_tuple!([L0, L1, L2, L3] T []);
+    impl_for_tuple!([L0, L1, L2, L3] T [R0]);
+    impl_for_tuple!([L0, L1, L2, L3] T [R0, R1]);
+    impl_for_tuple!([L0, L1, L2, L3] T [R0, R1, R2]);
+    impl_for_tuple!([L0, L1, L2, L3] T [R0, R1, R2, R3]);
+    impl_for_tuple!([L0, L1, L2, L3] T [R0, R1, R2, R3, R4]);
+    impl_for_tuple!([L0, L1, L2, L3] T [R0, R1, R2, R3, R4, R5]);
+    impl_for_tuple!([L0, L1, L2, L3] T [R0, R1, R2, R3, R4, R5, R6]);
+    impl_for_tuple!([L0, L1, L2, L3, L4] T []);
+    impl_for_tuple!([L0, L1, L2, L3, L4] T [R0]);
+    impl_for_tuple!([L0, L1, L2, L3, L4] T [R0, R1]);
+    impl_for_tuple!([L0, L1, L2, L3, L4] T [R0, R1, R2]);
+    impl_for_tuple!([L0, L1, L2, L3, L4] T [R0, R1, R2, R3]);
+    impl_for_tuple!([L0, L1, L2, L3, L4] T [R0, R1, R2, R3, R4]);
+    impl_for_tuple!([L0, L1, L2, L3, L4] T [R0, R1, R2, R3, R4, R5]);
+    impl_for_tuple!([L0, L1, L2, L3, L4, L5] T []);
+    impl_for_tuple!([L0, L1, L2, L3, L4, L5] T [R0]);
+    impl_for_tuple!([L0, L1, L2, L3, L4, L5] T [R0, R1]);
+    impl_for_tuple!([L0, L1, L2, L3, L4, L5] T [R0, R1, R2]);
+    impl_for_tuple!([L0, L1, L2, L3, L4, L5] T [R0, R1, R2, R3]);
+    impl_for_tuple!([L0, L1, L2, L3, L4, L5] T [R0, R1, R2, R3, R4]);
+    impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6] T []);
+    impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6] T [R0]);
+    impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6] T [R0, R1]);
+    impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6] T [R0, R1, R2]);
+    impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6] T [R0, R1, R2, R3]);
+    impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6, L7] T []);
+    impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6, L7] T [R0]);
+    impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6, L7] T [R0, R1]);
+    impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6, L7] T [R0, R1, R2]);
+    impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6, L7, L8] T []);
+    impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6, L7, L8] T [R0]);
+    impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6, L7, L8] T [R0, R1]);
+    impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6, L7, L8, L9] T []);
+    impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6, L7, L8, L9] T [R0]);
+    impl_for_tuple!([L0, L1, L2, L3, L4, L5, L6, L7, L8, L9, L10] T []);
+}
 
 macro_rules! emit_impl_trait {
     (
@@ -309,6 +292,11 @@ macro_rules! emit_impl_trait {
             MAX_LEN = $max_len:expr,
             param_len = { $($param_len:tt)* },
         }
+        {
+            lt = $lt:lifetime,
+            Iter = $iter_ty:ty,
+            param_iter = {$($param_iter:tt)*},
+        }
         $($_:tt)*
     ) => {
         impl<$($tpar)*> Parametrized<$n> for $self_ty
@@ -317,38 +305,12 @@ macro_rules! emit_impl_trait {
             const MIN_LEN: usize = $min_len;
             const MAX_LEN: Option<usize> = $max_len;
             fn param_len(&$self_val) -> usize { $($param_len)* }
-        }
-
-    };
-    (
-        [iter, $($acc:tt)*]
-        impl_generics = [$($tpar:tt)*],
-        PARAM = $n:literal,
-        Self = $self_ty:ty,
-        self = $self_val:ident,
-        { $($t0:tt)* }
-        {
-            lt = $lt:lifetime,
-            Iter = $iter_ty:ty,
-            param_iter = {$($param_iter:tt)*},
-        }
-        $($_:tt)*
-    ) => {
-        impl<$($tpar)*> ParametrizedIter<$n> for $self_ty
-        {
             type Iter<$lt> = $iter_ty where (Self, Self::Item): $lt;
             fn param_iter<$lt>(& $lt $self_val) -> Self::Iter<$lt> where Self::Item: $lt {
                 $($param_iter)*
             }
         }
-        emit_impl_trait!(
-            [$($acc)*]
-            impl_generics = [$($tpar)*],
-            PARAM = $n,
-            Self = $self_ty,
-            self = $self_val,
-            { $($t0)* }
-        );
+
     };
     (
         [iter_mut, $($acc:tt)*]
@@ -496,15 +458,15 @@ macro_rules! impl_all {
 }
 
 impl_all! {
-    [T] map, into_iter, iter_mut, iter for Vec<T>, T = M, Mapped = Vec<M>;
-    [T] into_iter, iter for std::collections::BTreeSet<T>;
-    [T] into_iter, iter for std::collections::HashSet<T>;
-    [T] into_iter, iter for std::collections::BinaryHeap<T>;
-    [T] map, into_iter, iter_mut, iter for std::collections::LinkedList<T>,
+    [T] map, into_iter, iter_mut for Vec<T>, T = M, Mapped = Vec<M>;
+    [T] into_iter for std::collections::BTreeSet<T>;
+    [T] into_iter for std::collections::HashSet<T>;
+    [T] into_iter for std::collections::BinaryHeap<T>;
+    [T] map, into_iter, iter_mut for std::collections::LinkedList<T>,
         T = M, Mapped = std::collections::LinkedList<M>;
-    [T] map, into_iter, iter_mut, iter for std::collections::VecDeque<T>,
+    [T] map, into_iter, iter_mut for std::collections::VecDeque<T>,
         T = M, Mapped = std::collections::VecDeque<M>;
-    [const N: usize, T] into_iter, iter_mut, iter for [T; N];
+    [const N: usize, T] into_iter, iter_mut for [T; N];
 }
 
 impl<T, M: Ord> ParametrizedMap<0, M> for std::collections::BTreeSet<T> {
@@ -543,8 +505,6 @@ impl<T, E> Parametrized<0> for Result<T, E> {
     fn param_len(&self) -> usize {
         self.is_ok() as usize
     }
-}
-impl<T, E> ParametrizedIter<0> for Result<T, E> {
     type Iter<'a> = std::result::Iter<'a, T> where (T,E):'a;
     fn param_iter<'a>(&'a self) -> Self::Iter<'a>
     where
@@ -595,8 +555,6 @@ impl<T, E> Parametrized<1> for Result<T, E> {
     fn param_len(&self) -> usize {
         self.is_err() as usize
     }
-}
-impl<T, E> ParametrizedIter<1> for Result<T, E> {
     type Iter<'a> = std::option::IntoIter<&'a E> where (T, E): 'a;
 
     fn param_iter<'a>(&'a self) -> Self::Iter<'a>
@@ -653,21 +611,19 @@ impl<T> ParametrizedIterMut<0> for [T] {
         self.iter_mut()
     }
 }
-impl<T> ParametrizedIter<0> for [T] {
-    type Iter<'a> = std::slice::Iter<'a, T> where T: 'a;
-    fn param_iter<'a>(&'a self) -> Self::Iter<'a>
-    where
-        Self::Item: 'a,
-    {
-        <&'a Self as IntoIterator>::into_iter(self)
-    }
-}
 impl<T> Parametrized<0> for [T] {
     type Item = T;
     const MIN_LEN: usize = 0;
     const MAX_LEN: Option<usize> = None;
     fn param_len(&self) -> usize {
         self.len()
+    }
+    type Iter<'a> = std::slice::Iter<'a, T> where T: 'a;
+    fn param_iter<'a>(&'a self) -> Self::Iter<'a>
+    where
+        Self::Item: 'a,
+    {
+        <&'a Self as IntoIterator>::into_iter(self)
     }
 }
 impl<T> ParametrizedIntoIter<0> for Option<T> {
@@ -685,21 +641,19 @@ impl<T> ParametrizedIterMut<0> for Option<T> {
         <&'a mut Self as IntoIterator>::into_iter(self)
     }
 }
-impl<T> ParametrizedIter<0> for Option<T> {
-    type Iter<'a> = core::option::Iter<'a,T> where T:'a;
-    fn param_iter<'a>(&'a self) -> Self::Iter<'a>
-    where
-        Self::Item: 'a,
-    {
-        <&'a Self as IntoIterator>::into_iter(self)
-    }
-}
 impl<T> Parametrized<0> for Option<T> {
     type Item = T;
     const MIN_LEN: usize = 0;
     const MAX_LEN: Option<usize> = None;
     fn param_len(&self) -> usize {
         self.is_some() as usize
+    }
+    type Iter<'a> = core::option::Iter<'a,T> where T:'a;
+    fn param_iter<'a>(&'a self) -> Self::Iter<'a>
+    where
+        Self::Item: 'a,
+    {
+        <&'a Self as IntoIterator>::into_iter(self)
     }
 }
 
@@ -710,9 +664,6 @@ impl<K, V> Parametrized<0> for std::collections::BTreeMap<K, V> {
     fn param_len(&self) -> usize {
         self.len()
     }
-}
-
-impl<K, V> ParametrizedIter<0> for std::collections::BTreeMap<K, V> {
     type Iter<'a> = std::collections::btree_map::Keys<'a, K, V> where (K, V): 'a;
     fn param_iter<'a>(&'a self) -> Self::Iter<'a>
     where
@@ -721,6 +672,7 @@ impl<K, V> ParametrizedIter<0> for std::collections::BTreeMap<K, V> {
         self.keys()
     }
 }
+
 impl<K, V> ParametrizedIntoIter<0> for std::collections::BTreeMap<K, V> {
     type IntoIter = std::collections::btree_map::IntoKeys<K, V>;
     fn param_into_iter(self) -> Self::IntoIter
@@ -743,8 +695,6 @@ impl<K, V> Parametrized<1> for std::collections::BTreeMap<K, V> {
     fn param_len(&self) -> usize {
         self.len()
     }
-}
-impl<K, V> ParametrizedIter<1> for std::collections::BTreeMap<K, V> {
     type Iter<'a> = std::collections::btree_map::Values<'a, K, V> where (K, V): 'a;
     fn param_iter<'a>(&'a self) -> Self::Iter<'a>
     where
@@ -784,9 +734,6 @@ impl<K, V> Parametrized<0> for std::collections::HashMap<K, V> {
     fn param_len(&self) -> usize {
         self.len()
     }
-}
-
-impl<K, V> ParametrizedIter<0> for std::collections::HashMap<K, V> {
     type Iter<'a> = std::collections::hash_map::Keys<'a, K, V> where (K, V): 'a;
     fn param_iter<'a>(&'a self) -> Self::Iter<'a>
     where
@@ -795,6 +742,7 @@ impl<K, V> ParametrizedIter<0> for std::collections::HashMap<K, V> {
         self.keys()
     }
 }
+
 impl<K, V> ParametrizedIntoIter<0> for std::collections::HashMap<K, V> {
     type IntoIter = std::collections::hash_map::IntoKeys<K, V>;
     fn param_into_iter(self) -> Self::IntoIter
@@ -817,8 +765,6 @@ impl<K, V> Parametrized<1> for std::collections::HashMap<K, V> {
     fn param_len(&self) -> usize {
         self.len()
     }
-}
-impl<K, V> ParametrizedIter<1> for std::collections::HashMap<K, V> {
     type Iter<'a> = std::collections::hash_map::Values<'a, K, V> where (K, V): 'a;
     fn param_iter<'a>(&'a self) -> Self::Iter<'a>
     where
