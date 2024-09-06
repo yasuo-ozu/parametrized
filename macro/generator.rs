@@ -8,12 +8,19 @@ use syn::*;
 use template_quote::quote;
 
 pub trait Emitter: PartialEq + Debug + Hash + Any {
+    type Elem: template_quote::ToTokens;
     fn native_reference(&self) -> TokenStream;
-    fn fold_initializer(&self) -> Expr;
-    fn item(&self, base_ty: &Type, index: usize, ty: &Type, expr: &Expr) -> Result<Option<Expr>>;
-    fn fold(&self, acc: &Expr, item: &Expr) -> Expr;
+    fn fold_initializer(&self) -> Self::Elem;
+    fn item(
+        &self,
+        base_ty: &Type,
+        index: usize,
+        ty: &Type,
+        expr: &Self::Elem,
+    ) -> Result<Option<Self::Elem>>;
+    fn fold(&self, acc: &Self::Elem, item: &Self::Elem) -> Self::Elem;
 
-    fn emit_pure(&self, ty: &Type, expr: &Expr) -> Expr;
+    fn emit_pure(&self, ty: &Type, expr: &Self::Elem) -> Self::Elem;
 
     fn access_over_ref(&self) -> bool;
     fn access_over_ref_mut(&self) -> bool;
@@ -26,11 +33,32 @@ pub struct EmitContext<K> {
     pub replacing_ty: Type,
 }
 
+pub trait ParseQuote<T> {
+    fn parse_quote(self) -> T;
+}
+
+impl ParseQuote<Expr> for TokenStream {
+    fn parse_quote(self) -> Expr {
+        parse_quote!(#self)
+    }
+}
+
+impl ParseQuote<Type> for TokenStream {
+    fn parse_quote(self) -> Type {
+        parse_quote!(#self)
+    }
+}
+
 impl<K> EmitContext<K>
 where
     Self: Emitter,
+    TokenStream: ParseQuote<<Self as Emitter>::Elem>,
 {
-    fn check_pure_and_emit(&self, ty: &Type, expr: &Expr) -> Option<Expr> {
+    fn check_pure_and_emit(
+        &self,
+        ty: &Type,
+        expr: &<Self as Emitter>::Elem,
+    ) -> Option<<Self as Emitter>::Elem> {
         if &self.replacing_ty == ty {
             Some(self.emit_pure(ty, expr))
         } else if let Type::Reference(TypeReference {
@@ -38,7 +66,11 @@ where
         }) = ty
         {
             if self.access_over_ref() || self.access_over_ref_mut() && mutability.is_some() {
-                self.check_pure_and_emit(elem, &parse_quote!(*#expr))
+                if self.native_reference().to_string().as_str() == "" {
+                    self.check_pure_and_emit(elem, expr)
+                } else {
+                    self.check_pure_and_emit(elem, &quote!(*#expr).parse_quote())
+                }
             } else {
                 None
             }
@@ -50,8 +82,8 @@ where
         &self,
         base_ty: &Type,
         tys: impl IntoIterator<Item = (usize, &'a Type)>,
-        expr: &Expr,
-    ) -> Result<Option<Expr>> {
+        expr: &<Self as Emitter>::Elem,
+    ) -> Result<Option<<Self as Emitter>::Elem>> {
         tys.into_iter().fold(Ok(None), |acc, (index, ty)| {
             eprintln!("emit_with_tys ty = {}", quote!(#ty));
             match (acc?, self.item(base_ty, index, ty, expr)?) {
@@ -63,8 +95,8 @@ where
     }
     pub fn emit_for_tys_exprs<'a>(
         &self,
-        tys_exprs: impl IntoIterator<Item = (Type, Expr)>,
-    ) -> Result<Option<Expr>> {
+        tys_exprs: impl IntoIterator<Item = (Type, <Self as Emitter>::Elem)>,
+    ) -> Result<Option<<Self as Emitter>::Elem>> {
         tys_exprs.into_iter().fold(Ok(None), |acc, (ty, expr)| {
             match (acc?, self.emit(&ty, &expr)?) {
                 (Some(acc), Some(item)) => Ok(Some(self.fold(&acc, &item))),
@@ -73,7 +105,11 @@ where
             }
         })
     }
-    pub fn emit(&self, ty: &Type, expr: &Expr) -> Result<Option<Expr>> {
+    pub fn emit(
+        &self,
+        ty: &Type,
+        expr: &<Self as Emitter>::Elem,
+    ) -> Result<Option<<Self as Emitter>::Elem>> {
         eprintln!("emit ty = {}, expr = {}", quote!(#ty), quote!(#expr));
         if let Some(out) = self.check_pure_and_emit(ty, expr) {
             eprintln!("ty = {}, out =  {}", quote!(#ty), quote!(#out));
@@ -207,6 +243,7 @@ where
 pub struct EmitMaxLen;
 
 impl Emitter for EmitContext<EmitMaxLen> {
+    type Elem = Expr;
     fn fold_initializer(&self) -> Expr {
         parse_quote! {::core::option::Option::Some(0usize)}
     }
@@ -231,9 +268,8 @@ impl Emitter for EmitContext<EmitMaxLen> {
 
     fn fold(&self, acc: &Expr, item: &Expr) -> Expr {
         parse_quote! {
-            if let (Some(l), Some(r)) = (
-                #acc, #item) {
-                Some(l + m * r)
+            if let (Some(l), Some(r)) = (#acc, #item) {
+                Some(l + r)
             } else {
                 None
             }
@@ -261,6 +297,7 @@ impl Emitter for EmitContext<EmitMaxLen> {
 pub struct EmitMinLen;
 
 impl Emitter for EmitContext<EmitMinLen> {
+    type Elem = Expr;
     fn fold_initializer(&self) -> Expr {
         parse_quote!(0usize)
     }
@@ -303,17 +340,24 @@ fn fold_iter_like<T>(
     index: usize,
     ty: &Type,
     expr: &Expr,
+    trait_name: &TokenStream,
+    fn_name: &TokenStream,
+    and: &TokenStream,
 ) -> Result<Option<Expr>>
 where
     EmitContext<T>: Emitter,
+    TokenStream: ParseQuote<<EmitContext<T> as Emitter>::Elem>,
 {
     let arg = Ident::new("__parametrized_arg", Span::call_site());
-    if let Some(inner) = ctx.emit(ty, &parse_quote!(#arg))? {
+    if let Some(inner) = ctx.emit(ty, &quote!(#arg).parse_quote())? {
         let krate = &ctx.krate;
         Ok(Some(parse_quote! {
-            <#base_ty as #krate::Parametrized<#index>>::param_iter(#expr)
-            .map(|#arg| #inner)
-            .flatten()
+            {
+                let __parametrized_fn: fn(#and #ty) -> _ = |#arg| {#inner};
+                <#base_ty as #krate::#trait_name<#index>>::#fn_name(#expr)
+                    .map(__parametrized_fn)
+                    .flatten()
+            }
         }))
     } else {
         Ok(None)
@@ -324,6 +368,7 @@ where
 pub struct EmitLen;
 
 impl Emitter for EmitContext<EmitLen> {
+    type Elem = Expr;
     fn fold_initializer(&self) -> Expr {
         parse_quote!(0usize)
     }
@@ -362,16 +407,106 @@ impl Emitter for EmitContext<EmitLen> {
         quote!(&)
     }
 }
+
+fn fold_iter_ty_like<T>(
+    ctx: &EmitContext<T>,
+    lt: &Lifetime,
+    base_ty: &Type,
+    index: usize,
+    ty: &Type,
+    expr: &Type,
+    trait_name: &TokenStream,
+    assoc_ty_name: &TokenStream,
+    and: &TokenStream,
+) -> Result<Option<Type>>
+where
+    EmitContext<T>: Emitter<Elem = Type>,
+    TokenStream: ParseQuote<Type>,
+{
+    if let Some(inner) = ctx.emit(ty, expr)? {
+        let krate = &ctx.krate;
+        Ok(Some(parse_quote! {
+            ::core::iter::Flatten<
+                ::core::iter::Map<
+                    <#base_ty as #krate::#trait_name<#index>>::#assoc_ty_name<#lt>,
+                    fn(#and #ty) -> #inner
+                >
+            >
+        }))
+    } else {
+        Ok(None)
+    }
+}
+
+#[derive(PartialEq, Eq, Hash, Debug)]
+pub struct EmitIterTy(pub Lifetime, pub Type);
+
+impl Emitter for EmitContext<EmitIterTy> {
+    type Elem = Type;
+    fn fold_initializer(&self) -> Type {
+        let lt = &self.kind.0;
+        let ty = &self.kind.1;
+        parse_quote!(::core::iter::Empty<#lt #ty>)
+    }
+
+    fn item(&self, base_ty: &Type, index: usize, ty: &Type, expr: &Type) -> Result<Option<Type>> {
+        let lt = &self.kind.0;
+        fold_iter_ty_like(
+            self,
+            lt,
+            base_ty,
+            index,
+            ty,
+            expr,
+            &quote!(Parametrized),
+            &quote!(Iter),
+            &quote!(&#lt),
+        )
+    }
+
+    fn fold(&self, acc: &Type, item: &Type) -> Type {
+        parse_quote!(::core::iter::Chain<#acc, #item>)
+    }
+
+    fn emit_pure(&self, _ty: &Type, _expr: &Type) -> Type {
+        let lt = &self.kind.0;
+        let iter_ty = &self.kind.1;
+        parse_quote!(::core::iter::Once<&#lt #iter_ty>)
+    }
+
+    fn access_over_ref(&self) -> bool {
+        true
+    }
+
+    fn access_over_ref_mut(&self) -> bool {
+        true
+    }
+
+    fn native_reference(&self) -> TokenStream {
+        quote!()
+    }
+}
+
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub struct EmitIter;
 
 impl Emitter for EmitContext<EmitIter> {
+    type Elem = Expr;
     fn fold_initializer(&self) -> Expr {
         parse_quote!(::core::iter::empty())
     }
 
     fn item(&self, base_ty: &Type, index: usize, ty: &Type, expr: &Expr) -> Result<Option<Expr>> {
-        fold_iter_like(self, base_ty, index, ty, expr)
+        fold_iter_like(
+            self,
+            base_ty,
+            index,
+            ty,
+            expr,
+            &quote! {Parametrized},
+            &quote!(param_iter),
+            &quote!(& '__parametrized_lt),
+        )
     }
 
     fn fold(&self, acc: &Expr, item: &Expr) -> Expr {
@@ -396,15 +531,74 @@ impl Emitter for EmitContext<EmitIter> {
 }
 
 #[derive(PartialEq, Eq, Hash, Debug)]
+pub struct EmitIterMutTy(pub Lifetime, pub Type);
+
+impl Emitter for EmitContext<EmitIterMutTy> {
+    type Elem = Type;
+    fn fold_initializer(&self) -> Type {
+        let lt = &self.kind.0;
+        let ty = &self.kind.1;
+        parse_quote!(::core::iter::Empty<#lt #ty>)
+    }
+
+    fn item(&self, base_ty: &Type, index: usize, ty: &Type, expr: &Type) -> Result<Option<Type>> {
+        let lt = &self.kind.0;
+        fold_iter_ty_like(
+            self,
+            &self.kind.0,
+            base_ty,
+            index,
+            ty,
+            expr,
+            &quote!(ParametrizedIterMut),
+            &quote!(IterMut),
+            &quote!(&#lt mut),
+        )
+    }
+
+    fn fold(&self, acc: &Type, item: &Type) -> Type {
+        parse_quote!(::core::iter::Chain<#acc, #item>)
+    }
+
+    fn emit_pure(&self, _ty: &Type, _expr: &Type) -> Type {
+        let lt = &self.kind.0;
+        let iter_ty = &self.kind.1;
+        parse_quote!(::core::iter::Once<&#lt mut #iter_ty>)
+    }
+
+    fn access_over_ref(&self) -> bool {
+        false
+    }
+
+    fn access_over_ref_mut(&self) -> bool {
+        true
+    }
+
+    fn native_reference(&self) -> TokenStream {
+        quote!()
+    }
+}
+
+#[derive(PartialEq, Eq, Hash, Debug)]
 pub struct EmitIterMut;
 
 impl Emitter for EmitContext<EmitIterMut> {
+    type Elem = Expr;
     fn fold_initializer(&self) -> Expr {
         parse_quote!(::core::iter::empty())
     }
 
     fn item(&self, base_ty: &Type, index: usize, ty: &Type, expr: &Expr) -> Result<Option<Expr>> {
-        fold_iter_like(self, base_ty, index, ty, expr)
+        fold_iter_like(
+            self,
+            base_ty,
+            index,
+            ty,
+            expr,
+            &quote!(ParametrizedIterMut),
+            &quote!(param_iter_mut),
+            &quote!(& '__parametrized_lt mut),
+        )
     }
 
     fn fold(&self, acc: &Expr, item: &Expr) -> Expr {
@@ -430,11 +624,21 @@ impl Emitter for EmitContext<EmitIterMut> {
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub struct EmitIntoIter;
 impl Emitter for EmitContext<EmitIntoIter> {
+    type Elem = Expr;
     fn fold_initializer(&self) -> Expr {
         parse_quote!(::core::iter::empty())
     }
     fn item(&self, base_ty: &Type, index: usize, ty: &Type, expr: &Expr) -> Result<Option<Expr>> {
-        fold_iter_like(self, base_ty, index, ty, expr)
+        fold_iter_like(
+            self,
+            base_ty,
+            index,
+            ty,
+            expr,
+            &quote!(ParametrizedIntoIter),
+            &quote!(param_into_iter),
+            &quote!(),
+        )
     }
 
     fn fold(&self, acc: &Expr, item: &Expr) -> Expr {
@@ -460,6 +664,7 @@ impl Emitter for EmitContext<EmitIntoIter> {
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub struct EmitMap;
 impl Emitter for EmitContext<EmitMap> {
+    type Elem = Expr;
     fn fold_initializer(&self) -> Expr {
         todo!()
     }
