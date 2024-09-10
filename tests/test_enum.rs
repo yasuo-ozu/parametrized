@@ -6,11 +6,10 @@ enum Enum1<K> {
     V2(K),
     V3 { _f1: usize, _f2: K },
 }
-
 #[test]
 fn test1() {
     let e1: Enum1<()> = Enum1::V1;
-    assert_eq!((&e1).param_len(), 0);
+    assert_eq!(e1.param_len(), 0);
     assert_eq!(e1.param_iter().collect::<Vec<_>>(), vec![] as Vec<&()>);
     let mut e2 = Enum1::V2(123usize);
     assert_eq!(e2.param_len(), 1);

@@ -84,95 +84,111 @@ impl TraitTarget {
         self_val: &Ident,
         tys_exprs: &[Vec<(Type, Expr)>],
         mut f: impl FnMut(&[TokenStream]) -> TokenStream,
+        needs_ref: bool,
     ) -> Result<TokenStream> {
         let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
         match self {
             Self::Default => {
-                eprintln!("len");
                 let out_len = tys_exprs
                     .iter()
                     .map(|item| {
-                        let ret = generator::EmitContext {
+                        Ok(generator::EmitContext {
                             kind: generator::EmitLen,
                             krate: krate.clone(),
                             replacing_ty: replacing_ty.clone(),
                         }
-                        .emit_for_tys_exprs(
-                            item.iter().map(|(a, b)| (a.clone(), parse_quote! {&#b})),
-                        );
-                        ret
+                        .emit_for_tys_exprs(item.iter().map(|(a, b)| {
+                            (
+                                a.clone(),
+                                if needs_ref {
+                                    parse_quote! {&#b}
+                                } else {
+                                    parse_quote! {#b}
+                                },
+                            )
+                        }))?
+                        .unwrap_or(parse_quote!(0usize)))
                     })
-                    .collect::<Result<Option<Vec<_>>>>()?
-                    .unwrap_or_else(|| abort!(Span::call_site(), "Cannot implement len method"))
+                    .collect::<Result<Vec<_>>>()?
                     .into_iter()
                     .map(|expr| quote!(#expr))
                     .collect::<Vec<_>>();
-                eprintln!("max_len");
                 let out_max_len = tys_exprs
                     .iter()
                     .map(|item| {
-                        generator::EmitContext {
+                        Ok(generator::EmitContext {
                             kind: generator::EmitMaxLen,
                             krate: krate.clone(),
                             replacing_ty: replacing_ty.clone(),
                         }
-                        .emit_for_tys_exprs(
-                            item.iter().map(|(a, b)| (a.clone(), parse_quote!(&#b))),
-                        )
+                        .emit_for_tys_exprs(item.iter().map(|(a, b)| {
+                            (
+                                a.clone(),
+                                if needs_ref {
+                                    parse_quote!(&#b)
+                                } else {
+                                    parse_quote!(#b)
+                                },
+                            )
+                        }))?
+                        .unwrap_or(parse_quote!(::core::option::Option::Some(0usize))))
                     })
-                    .collect::<Result<Option<Vec<_>>>>()?
-                    .unwrap_or_else(|| abort!(Span::call_site(), "Cannot implement maxlen method"));
-                eprintln!("min_len");
+                    .collect::<Result<Vec<_>>>()?;
                 let out_min_len = tys_exprs
                     .iter()
                     .map(|item| {
-                        generator::EmitContext {
+                        Ok(generator::EmitContext {
                             kind: generator::EmitMinLen,
                             krate: krate.clone(),
                             replacing_ty: replacing_ty.clone(),
                         }
-                        .emit_for_tys_exprs(
-                            item.iter().map(|(a, b)| (a.clone(), parse_quote!(&#b))),
-                        )
+                        .emit_for_tys_exprs(item.iter().map(|(a, b)| {
+                            (
+                                a.clone(),
+                                if needs_ref {
+                                    parse_quote!(&#b)
+                                } else {
+                                    parse_quote!(#b)
+                                },
+                            )
+                        }))?
+                        .unwrap_or(parse_quote!(0usize)))
                     })
-                    .collect::<Result<Option<Vec<_>>>>()?
-                    .unwrap_or_else(|| abort!(Span::call_site(), "Cannot implement minlen method"));
-                eprintln!("iter_ty");
+                    .collect::<Result<Vec<_>>>()?;
                 let iter_ty_lt: Lifetime = parse_quote!('__parametrized_lt);
                 let out_iter_ty = tys_exprs
                     .iter()
                     .map(|item| {
-                        generator::EmitContext {
+                        Ok(generator::EmitContext {
                             kind: generator::EmitIterTy(iter_ty_lt.clone(), replacing_ty.clone()),
                             krate: krate.clone(),
                             replacing_ty: replacing_ty.clone(),
                         }
                         .emit_for_tys_exprs(
                             item.iter().map(|(a, _)| (a.clone(), replacing_ty.clone())),
-                        )
+                        )?
+                        .unwrap_or(parse_quote!(::core::iter::Empty<&#iter_ty_lt #replacing_ty>)))
                     })
-                    .collect::<Result<Option<Vec<_>>>>()?
-                    .unwrap_or_else(|| abort!(Span::call_site(), "Cannot implement iter method"));
-                eprintln!("iter");
+                    .collect::<Result<Vec<_>>>()?;
                 let out_iter = tys_exprs
                     .iter()
                     .map(|item| {
-                        generator::EmitContext {
+                        Ok(generator::EmitContext {
                             kind: generator::EmitIter,
                             krate: krate.clone(),
                             replacing_ty: replacing_ty.clone(),
                         }
                         .emit_for_tys_exprs(
-                            item.iter().map(|(a, b)| (a.clone(), parse_quote!(&#b))),
-                        )
+                            item.iter().map(|(a, b)| (a.clone(), if needs_ref{parse_quote!(&#b)}else{parse_quote!(#b)})),
+                        )?
+                        .unwrap_or(parse_quote!(::core::iter::empty())))
                     })
-                    .collect::<Result<Option<Vec<_>>>>()?
-                    .unwrap_or_else(|| abort!(Span::call_site(), "Cannot implement iter method"))
+                    .collect::<Result<Vec<_>>>()?
                     .into_iter()
                     .zip(&out_iter_ty)
                     .map(|(expr, ty)| {
                         if tys_exprs.len() > 1 {
-                            quote!(#krate::_imp::sumtype!(#expr, #ty))
+                            quote!(sumtype!(#expr, for<#iter_ty_lt> #ty where #replacing_ty: #iter_ty_lt))
                         } else {
                             quote!(#expr)
                         }
@@ -191,7 +207,7 @@ impl TraitTarget {
                             #{f(out_len.as_slice())}
                         }
                         #(if tys_exprs.len() > 1) {
-                            type Iter<#iter_ty_lt> = #krate::_imp::sumtype!() where (Self, Self::Item): #iter_ty_lt;
+                            type Iter<#iter_ty_lt> = sumtype![#iter_ty_lt] where (Self, Self::Item): #iter_ty_lt;
                         } #(else) {
                             type Iter<#iter_ty_lt> = #(#out_iter_ty)* where (Self, Self::Item): #iter_ty_lt;
                         }
@@ -206,10 +222,10 @@ impl TraitTarget {
             }
             Self::IterMut => {
                 let iter_ty_lt: Lifetime = parse_quote!('__parametrized_lt);
-                let out_iter_ty = tys_exprs
+                let out_iter_mut_ty = tys_exprs
                     .iter()
                     .map(|item| {
-                        generator::EmitContext {
+                        Ok(generator::EmitContext {
                             kind: generator::EmitIterMutTy(
                                 iter_ty_lt.clone(),
                                 replacing_ty.clone(),
@@ -219,28 +235,35 @@ impl TraitTarget {
                         }
                         .emit_for_tys_exprs(
                             item.iter().map(|(a, _)| (a.clone(), replacing_ty.clone())),
-                        )
+                        )?
+                        .unwrap_or(
+                            parse_quote!(::core::iter::Empty<& #iter_ty_lt mut #replacing_ty>),
+                        ))
                     })
-                    .collect::<Result<Option<Vec<_>>>>()?
-                    .unwrap_or_else(|| abort!(Span::call_site(), "Cannot implement iter method"));
+                    .collect::<Result<Vec<_>>>()?;
                 let out_iter_mut = tys_exprs
                     .iter()
                     .map(|item| {
-                        generator::EmitContext {
+                        Ok(generator::EmitContext {
                             kind: generator::EmitIterMut,
                             krate: krate.clone(),
                             replacing_ty: replacing_ty.clone(),
                         }
                         .emit_for_tys_exprs(
-                            item.iter().map(|(a, b)| (a.clone(), parse_quote!(&mut #b))),
-                        )
+                            item.iter().map(|(a, b)| (a.clone(), if needs_ref{parse_quote!(&mut #b)}else{parse_quote!(#b)})),
+                        )?
+                        .unwrap_or(parse_quote!(::core::iter::empty())))
                     })
-                    .collect::<Result<Option<Vec<_>>>>()?
-                    .unwrap_or_else(|| {
-                        abort!(Span::call_site(), "Cannot implement iter_mut method")
-                    })
+                    .collect::<Result<Vec<_>>>()?
                     .into_iter()
-                    .map(|expr| quote!(#expr))
+                    .zip(&out_iter_mut_ty)
+                    .map(|(expr, ty)| {
+                        if tys_exprs.len() > 1 {
+                            quote!(sumtype!(#expr, for<#iter_ty_lt> #ty where #replacing_ty: #iter_ty_lt))
+                        } else {
+                            quote!(#expr)
+                        }
+                    })
                     .collect::<Vec<_>>();
                 Ok(quote! {
                     #(if tys_exprs.len() > 1) {
@@ -248,9 +271,9 @@ impl TraitTarget {
                     }
                     impl #impl_generics #krate::ParametrizedIterMut<#param_index> for #ident #ty_generics #where_clause {
                         #(if tys_exprs.len() > 1) {
-                            type IterMut<#iter_ty_lt> = #krate::_imp::sumtype!() where (Self, Self::Item): #iter_ty_lt;
+                            type IterMut<#iter_ty_lt> = sumtype![#iter_ty_lt] where (Self, Self::Item): #iter_ty_lt;
                         } #(else) {
-                            type IterMut<#iter_ty_lt> = #(#out_iter_ty)* where (Self, Self::Item): #iter_ty_lt;
+                            type IterMut<#iter_ty_lt> = #(#out_iter_mut_ty)* where (Self, Self::Item): #iter_ty_lt;
                         }
                         fn param_iter_mut<'__parametrized_lt>(&'__parametrized_lt mut #self_val) -> Self::IterMut<'__parametrized_lt>
                         where
@@ -262,26 +285,52 @@ impl TraitTarget {
                 })
             }
             Self::IntoIter => {
+                let out_into_iter_ty = tys_exprs
+                    .iter()
+                    .map(|item| {
+                        Ok(generator::EmitContext {
+                            kind: generator::EmitIntoIterTy(replacing_ty.clone()),
+                            krate: krate.clone(),
+                            replacing_ty: replacing_ty.clone(),
+                        }
+                        .emit_for_tys_exprs(
+                            item.iter().map(|(a, _)| (a.clone(), replacing_ty.clone())),
+                        )?
+                        .unwrap_or(parse_quote!(::core::iter::Empty<#replacing_ty>)))
+                    })
+                    .collect::<Result<Vec<_>>>()?;
                 let out_into_iter = tys_exprs
                     .iter()
                     .map(|item| {
-                        generator::EmitContext {
+                        Ok(generator::EmitContext {
                             kind: generator::EmitIntoIter,
                             krate: krate.clone(),
                             replacing_ty: replacing_ty.clone(),
                         }
-                        .emit_for_tys_exprs(item.iter().map(|(a, b)| (a.clone(), b.clone())))
+                        .emit_for_tys_exprs(item.iter().map(|(a, b)| (a.clone(), b.clone())))?
+                        .unwrap_or(parse_quote!(::core::iter::empty())))
                     })
-                    .collect::<Result<Option<Vec<_>>>>()?
-                    .unwrap_or_else(|| {
-                        abort!(Span::call_site(), "Cannot implement into_iter method")
-                    })
+                    .collect::<Result<Vec<_>>>()?
                     .into_iter()
-                    .map(|expr| quote!(#expr))
+                    .zip(&out_into_iter_ty)
+                    .map(|(expr, ty)| {
+                        if tys_exprs.len() > 1 {
+                            quote!(sumtype!(#expr, #ty))
+                        } else {
+                            quote!(#expr)
+                        }
+                    })
                     .collect::<Vec<_>>();
                 Ok(quote! {
+                    #(if tys_exprs.len() > 1) {
+                        #[#krate::_imp::sumtype]
+                    }
                     impl #impl_generics #krate::ParametrizedIntoIter<#param_index> for #ident #ty_generics #where_clause {
-                        type IntoIter = todo!();
+                        #(if tys_exprs.len() > 1) {
+                            type IntoIter = sumtype![];
+                        } #(else) {
+                            type IntoIter = #(#out_into_iter_ty)*;
+                        }
                         fn param_into_iter(#self_val) -> Self::IntoIter
                         {
                             #{f(out_into_iter.as_slice())}
@@ -452,13 +501,14 @@ impl ImplTarget for ItemStruct {
                     #(#inner)*
                 }
             },
+            true,
         )
     }
 }
 
 impl ImplTarget for ItemEnum {
     fn emit_impl(&self, krate: &Path, tr: &TraitTarget, param_index: usize) -> Result<TokenStream> {
-        let self_val: Ident = parse_quote!(self);
+        let self_val: Ident = Ident::new("self", Span::call_site());
         let replacing_ty = get_replacing_ty(&self.generics, param_index);
         let variant_idents = self
             .variants
@@ -518,6 +568,7 @@ impl ImplTarget for ItemEnum {
                     }
                 }
             },
+            false,
         )
     }
 }

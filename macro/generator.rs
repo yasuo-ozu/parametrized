@@ -85,7 +85,6 @@ where
         expr: &<Self as Emitter>::Elem,
     ) -> Result<Option<<Self as Emitter>::Elem>> {
         tys.into_iter().fold(Ok(None), |acc, (index, ty)| {
-            eprintln!("emit_with_tys ty = {}", quote!(#ty));
             match (acc?, self.item(base_ty, index, ty, expr)?) {
                 (Some(acc), Some(item)) => Ok(Some(self.fold(&acc, &item))),
                 (Some(o), None) | (None, Some(o)) => Ok(Some(o)),
@@ -110,9 +109,7 @@ where
         ty: &Type,
         expr: &<Self as Emitter>::Elem,
     ) -> Result<Option<<Self as Emitter>::Elem>> {
-        eprintln!("emit ty = {}, expr = {}", quote!(#ty), quote!(#expr));
         if let Some(out) = self.check_pure_and_emit(ty, expr) {
-            eprintln!("ty = {}, out =  {}", quote!(#ty), quote!(#out));
             return Ok(Some(out));
         }
         match ty {
@@ -621,6 +618,55 @@ impl Emitter for EmitContext<EmitIterMut> {
         quote!(&mut)
     }
 }
+
+#[derive(PartialEq, Eq, Hash, Debug)]
+pub struct EmitIntoIterTy(pub Type);
+
+impl Emitter for EmitContext<EmitIntoIterTy> {
+    type Elem = Type;
+    fn fold_initializer(&self) -> Type {
+        let ty = &self.kind.0;
+        parse_quote!(::core::iter::Empty<#ty>)
+    }
+
+    fn item(&self, base_ty: &Type, index: usize, ty: &Type, expr: &Type) -> Result<Option<Type>> {
+        if let Some(inner) = self.emit(ty, expr)? {
+            let krate = &self.krate;
+            Ok(Some(parse_quote! {
+                ::core::iter::Flatten<
+                    ::core::iter::Map<
+                        <#base_ty as #krate::ParametrizedIntoIter<#index>>::param_into_iter,
+                        fn(#ty) -> #inner
+                    >
+                >
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn fold(&self, acc: &Type, item: &Type) -> Type {
+        parse_quote!(::core::iter::Chain<#acc, #item>)
+    }
+
+    fn emit_pure(&self, _ty: &Type, _expr: &Type) -> Type {
+        let iter_ty = &self.kind.0;
+        parse_quote!(::core::iter::Once<#iter_ty>)
+    }
+
+    fn access_over_ref(&self) -> bool {
+        false
+    }
+
+    fn access_over_ref_mut(&self) -> bool {
+        false
+    }
+
+    fn native_reference(&self) -> TokenStream {
+        quote!()
+    }
+}
+
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub struct EmitIntoIter;
 impl Emitter for EmitContext<EmitIntoIter> {
