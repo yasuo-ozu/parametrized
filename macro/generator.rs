@@ -10,7 +10,6 @@ use template_quote::quote;
 pub trait Emitter: PartialEq + Debug + Hash + Any {
     type Elem: Clone;
     fn native_reference(&self) -> TokenStream;
-    fn fold_initializer(&self) -> Self::Elem;
     fn item(
         &self,
         base_ty: &Type,
@@ -102,11 +101,9 @@ where
         expr: &<Self as Emitter>::Elem,
     ) -> Result<Option<<Self as Emitter>::Elem>> {
         let base_expr = expr.clone();
-        Ok(tys
-            .into_iter()
-            .fold(Ok(Some(expr.clone())), |acc, (index, ty)| {
-                self.fold_item(base_ty.clone(), &base_expr, ty, acc?, index)
-            })?)
+        Ok(tys.into_iter().fold(Ok(None), |acc, (index, ty)| {
+            self.fold_item(base_ty.clone(), &base_expr, ty, acc?, index)
+        })?)
     }
     pub fn emit_for_tys_exprs<'a>(
         &self,
@@ -257,9 +254,6 @@ pub struct EmitMaxLen;
 
 impl Emitter for EmitContext<EmitMaxLen> {
     type Elem = Expr;
-    fn fold_initializer(&self) -> Expr {
-        parse_quote! {::core::option::Option::Some(0usize)}
-    }
 
     fn item(&self, base_ty: &Type, index: usize, ty: &Type, expr: &Expr) -> Result<Option<Expr>> {
         let krate = &self.krate;
@@ -314,9 +308,6 @@ pub struct EmitMinLen;
 
 impl Emitter for EmitContext<EmitMinLen> {
     type Elem = Expr;
-    fn fold_initializer(&self) -> Expr {
-        parse_quote!(0usize)
-    }
 
     fn item(&self, base_ty: &Type, index: usize, ty: &Type, expr: &Expr) -> Result<Option<Expr>> {
         if let Some(inner) = self.emit(ty, expr)? {
@@ -388,9 +379,6 @@ pub struct EmitLen;
 
 impl Emitter for EmitContext<EmitLen> {
     type Elem = Expr;
-    fn fold_initializer(&self) -> Expr {
-        parse_quote!(0usize)
-    }
 
     fn item(&self, base_ty: &Type, index: usize, ty: &Type, expr: &Expr) -> Result<Option<Expr>> {
         let krate = &self.krate;
@@ -465,11 +453,6 @@ pub struct EmitIterTy(pub Lifetime, pub Type);
 
 impl Emitter for EmitContext<EmitIterTy> {
     type Elem = Type;
-    fn fold_initializer(&self) -> Type {
-        let lt = &self.kind.0;
-        let ty = &self.kind.1;
-        parse_quote!(::core::iter::Empty<#lt #ty>)
-    }
 
     fn item(&self, base_ty: &Type, index: usize, ty: &Type, expr: &Type) -> Result<Option<Type>> {
         let lt = &self.kind.0;
@@ -517,9 +500,6 @@ pub struct EmitIter;
 
 impl Emitter for EmitContext<EmitIter> {
     type Elem = Expr;
-    fn fold_initializer(&self) -> Expr {
-        parse_quote!(::core::iter::empty())
-    }
 
     fn item(&self, base_ty: &Type, index: usize, ty: &Type, expr: &Expr) -> Result<Option<Expr>> {
         fold_iter_like(
@@ -538,7 +518,7 @@ impl Emitter for EmitContext<EmitIter> {
         parse_quote!(#acc.chain(#item))
     }
 
-    fn emit_pure(&self, ty: &Type, expr: &Expr) -> Expr {
+    fn emit_pure(&self, _ty: &Type, expr: &Expr) -> Expr {
         parse_quote!(::core::iter::once(#expr))
     }
 
@@ -563,11 +543,6 @@ pub struct EmitIterMutTy(pub Lifetime, pub Type);
 
 impl Emitter for EmitContext<EmitIterMutTy> {
     type Elem = Type;
-    fn fold_initializer(&self) -> Type {
-        let lt = &self.kind.0;
-        let ty = &self.kind.1;
-        parse_quote!(::core::iter::Empty<#lt #ty>)
-    }
 
     fn item(&self, base_ty: &Type, index: usize, ty: &Type, expr: &Type) -> Result<Option<Type>> {
         let lt = &self.kind.0;
@@ -615,9 +590,6 @@ pub struct EmitIterMut;
 
 impl Emitter for EmitContext<EmitIterMut> {
     type Elem = Expr;
-    fn fold_initializer(&self) -> Expr {
-        parse_quote!(::core::iter::empty())
-    }
 
     fn item(&self, base_ty: &Type, index: usize, ty: &Type, expr: &Expr) -> Result<Option<Expr>> {
         fold_iter_like(
@@ -661,10 +633,6 @@ pub struct EmitIntoIterTy(pub Type);
 
 impl Emitter for EmitContext<EmitIntoIterTy> {
     type Elem = Type;
-    fn fold_initializer(&self) -> Type {
-        let ty = &self.kind.0;
-        parse_quote!(::core::iter::Empty<#ty>)
-    }
 
     fn item(&self, base_ty: &Type, index: usize, ty: &Type, expr: &Type) -> Result<Option<Type>> {
         if let Some(inner) = self.emit(ty, expr)? {
@@ -672,7 +640,7 @@ impl Emitter for EmitContext<EmitIntoIterTy> {
             Ok(Some(parse_quote! {
                 ::core::iter::Flatten<
                     ::core::iter::Map<
-                        <#base_ty as #krate::ParametrizedIntoIter<#index>>::param_into_iter,
+                        <#base_ty as #krate::ParametrizedIntoIter<#index>>::IntoIter,
                         fn(#ty) -> #inner
                     >
                 >
@@ -711,9 +679,6 @@ impl Emitter for EmitContext<EmitIntoIterTy> {
 pub struct EmitIntoIter;
 impl Emitter for EmitContext<EmitIntoIter> {
     type Elem = Expr;
-    fn fold_initializer(&self) -> Expr {
-        parse_quote!(::core::iter::empty())
-    }
     fn item(&self, base_ty: &Type, index: usize, ty: &Type, expr: &Expr) -> Result<Option<Expr>> {
         fold_iter_like(
             self,
@@ -754,9 +719,6 @@ impl Emitter for EmitContext<EmitIntoIter> {
 pub struct EmitMap(pub Ident, pub Ident);
 impl Emitter for EmitContext<EmitMap> {
     type Elem = (Expr, Type);
-    fn fold_initializer(&self) -> (Expr, Type) {
-        unreachable!()
-    }
 
     fn emit_pure(&self, _ty: &Type, expr: &(Expr, Type)) -> (Expr, Type) {
         let map_fn = &self.kind.0;
@@ -783,13 +745,53 @@ impl Emitter for EmitContext<EmitMap> {
         ty: &Type,
         (expr, acc_ty): &Self::Elem,
     ) -> Result<Option<Self::Elem>> {
+        panic!()
+        // let krate = &self.krate;
+        // let map_param = &self.kind.1;
+        // let arg = Ident::new("__parametrized_arg", Span::call_site());
+        // if let Some((inner_exp, inner_ty)) = self.emit(acc_ty, &(parse_quote!(#arg), ty.clone()))? {
+        //     Ok(Some((
+        //         parse_quote!(
+        //             <#base_ty as #krate::ParametrizedMap<#index, #map_param>>::param_map(
+        //                 #expr,
+        //                 |#arg| { #inner_exp }
+        //             )
+        //         ),
+        //         inner_ty,
+        //     )))
+        // } else {
+        //     Ok(None)
+        // }
+    }
+
+    fn fold_item(
+        &self,
+        base_ty: Type,
+        (expr0, ty0): &<Self as Emitter>::Elem,
+        ty: &Type,
+        elem: Option<<Self as Emitter>::Elem>,
+        index: usize,
+    ) -> Result<Option<<Self as Emitter>::Elem>> {
         let krate = &self.krate;
         let map_param = &self.kind.1;
+        let replaced_ty = super::replace_type(
+            ty.clone(),
+            self.replacing_ty.clone(),
+            parse_quote!(#map_param),
+        );
         let arg = Ident::new("__parametrized_arg", Span::call_site());
-        if let Some((inner_exp, inner_ty)) = self.emit(acc_ty, &(parse_quote!(#arg), ty.clone()))? {
+        if let Some((inner_exp, inner_ty)) = self.emit(ty, &(parse_quote!(#arg), ty.clone()))? {
+            let expr = if let Some((expr1, _)) = elem {
+                expr1
+            } else {
+                expr0.clone()
+            };
             Ok(Some((
                 parse_quote!(
-                    <#base_ty as #krate::ParametrizedMap<#index, #map_param>>::param_map(
+                    <#base_ty as #krate::ParametrizedMap<
+                        #index,
+                        #replaced_ty
+                    >>::param_map(
                         #expr,
                         |#arg| { #inner_exp }
                     )

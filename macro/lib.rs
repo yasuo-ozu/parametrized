@@ -342,7 +342,7 @@ impl TraitTarget {
                     #(if tys_exprs.len() > 1) {
                         #[#krate::_imp::sumtype]
                     }
-                    impl #krate::ParametrizedIntoIter<#param_index> for #ident #ty_generics #where_clause {
+                    impl #impl_generics #krate::ParametrizedIntoIter<#param_index> for #ident #ty_generics #where_clause {
                         #(if tys_exprs.len() > 1) {
                             type IntoIter = sumtype![];
                         } #(else) {
@@ -361,20 +361,18 @@ impl TraitTarget {
                 let out_map = tys_exprs
                     .iter()
                     .map(|item| {
-                        Ok(item
-                            .iter()
+                        item.iter()
                             .map(|(a, b)| {
-                                generator::EmitContext {
+                                Ok(generator::EmitContext {
                                     kind: generator::EmitMap(map_fn.clone(), mapped_param.clone()),
                                     krate: krate.clone(),
                                     replacing_ty: replacing_ty.clone(),
                                 }
-                                .emit(a, &(b.clone(), a.clone()))
+                                .emit(a, &(b.clone(), a.clone()))?
+                                .map(|a| a.0)
+                                .unwrap_or(b.clone()))
                             })
-                            .collect::<Result<Option<Vec<_>>>>()?
-                            .unwrap_or_else(|| {
-                                abort!(Span::call_site(), "Cannot implement map method")
-                            }))
+                            .collect::<Result<Vec<_>>>()
                     })
                     .collect::<Result<Vec<_>>>()?;
                 let mapped = replace_type(
@@ -382,12 +380,15 @@ impl TraitTarget {
                     replacing_ty.clone(),
                     parse_quote!(#mapped_param),
                 );
+                eprintln!("emit_map_f = [{}]", emit_map_f(out_map.as_slice()));
                 Ok(quote! {
                     impl <#(for p in &generics.params){ #p, } #mapped_param> #krate::ParametrizedMap<#param_index, #mapped_param> for #ident #ty_generics #where_clause {
                         type Mapped = #mapped;
-                        fn param_map(#self_val, #map_fn) -> Self::Mapped
+                        fn param_map(#self_val, mut #map_fn: impl FnMut(Self::Item) -> #mapped_param) -> Self::Mapped
+                        where
+                            Self::Item: ::core::marker::Sized
                         {
-                            #{emit_map_f(out_map.iter().map(|a| a.iter().map(|(a, b)| a.clone()).collect::<Vec<_>>()).collect::<Vec<_>>().as_slice())}
+                            #{emit_map_f(out_map.as_slice())}
                         }
                     }
                 })
@@ -535,7 +536,7 @@ impl ImplTarget for ItemStruct {
                             #{&field.ident} : #inner,
                         }}
                     } #(else) {
-                        ( #(for inner in items[0].iter()) { #inner })
+                        ( #(for inner in items[0].iter()), { #inner })
                     }
                 }
             },

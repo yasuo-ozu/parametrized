@@ -1,7 +1,7 @@
 use parametrized::*;
 
 #[allow(unused)]
-#[parametrized(default, iter_mut)]
+#[parametrized(default, iter_mut, map)]
 struct Struct1<K>(usize, Vec<(usize, K)>);
 
 #[test]
@@ -16,8 +16,8 @@ fn test1() {
         s.param_iter().collect::<Vec<_>>(),
         vec![&"konnichiwa", &"konnichiwa"]
     );
-    // let s = s.map_of_param(|s| s.len());
-    // assert_eq!(s.into_iter_of_arg().collect::<Vec<_>>(), vec![10, 10]);
+    let s = s.param_map(|s| s.len());
+    assert_eq!(s.param_into_iter().collect::<Vec<_>>(), vec![10, 10]);
 }
 
 #[parametrized(default = 1)]
