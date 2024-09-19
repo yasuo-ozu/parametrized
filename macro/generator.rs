@@ -8,7 +8,7 @@ use syn::*;
 use template_quote::quote;
 
 pub trait Emitter: PartialEq + Debug + Hash + Any {
-    type Elem: template_quote::ToTokens;
+    type Elem: Clone;
     fn native_reference(&self) -> TokenStream;
     fn fold_initializer(&self) -> Self::Elem;
     fn item(
@@ -16,14 +16,31 @@ pub trait Emitter: PartialEq + Debug + Hash + Any {
         base_ty: &Type,
         index: usize,
         ty: &Type,
-        expr: &Self::Elem,
+        elem: &Self::Elem,
     ) -> Result<Option<Self::Elem>>;
     fn fold(&self, acc: &Self::Elem, item: &Self::Elem) -> Self::Elem;
 
-    fn emit_pure(&self, ty: &Type, expr: &Self::Elem) -> Self::Elem;
+    fn emit_pure(&self, ty: &Type, elem: &Self::Elem) -> Self::Elem;
 
     fn access_over_ref(&self) -> bool;
     fn access_over_ref_mut(&self) -> bool;
+
+    fn do_deref(&self, elem: &Self::Elem) -> Self::Elem;
+
+    fn fold_item(
+        &self,
+        base_ty: Type,
+        base_elem: &<Self as Emitter>::Elem,
+        ty: &Type,
+        elem: Option<<Self as Emitter>::Elem>,
+        index: usize,
+    ) -> Result<Option<<Self as Emitter>::Elem>> {
+        match (elem, self.item(&base_ty, index, ty, base_elem)?) {
+            (Some(elem), Some(item)) => Ok(Some(self.fold(&elem, &item))),
+            (Some(o), None) | (None, Some(o)) => Ok(Some(o)),
+            _ => Ok(None),
+        }
+    }
 }
 
 #[derive(PartialEq, Debug, Hash)]
@@ -52,7 +69,6 @@ impl ParseQuote<Type> for TokenStream {
 impl<K> EmitContext<K>
 where
     Self: Emitter,
-    TokenStream: ParseQuote<<Self as Emitter>::Elem>,
 {
     fn check_pure_and_emit(
         &self,
@@ -69,7 +85,7 @@ where
                 if self.native_reference().to_string().as_str() == "" {
                     self.check_pure_and_emit(elem, expr)
                 } else {
-                    self.check_pure_and_emit(elem, &quote!(*#expr).parse_quote())
+                    self.check_pure_and_emit(elem, &self.do_deref(expr))
                 }
             } else {
                 None
@@ -78,19 +94,19 @@ where
             None
         }
     }
+
     fn emit_with_tys<'a>(
         &self,
         base_ty: &Type,
         tys: impl IntoIterator<Item = (usize, &'a Type)>,
         expr: &<Self as Emitter>::Elem,
     ) -> Result<Option<<Self as Emitter>::Elem>> {
-        tys.into_iter().fold(Ok(None), |acc, (index, ty)| {
-            match (acc?, self.item(base_ty, index, ty, expr)?) {
-                (Some(acc), Some(item)) => Ok(Some(self.fold(&acc, &item))),
-                (Some(o), None) | (None, Some(o)) => Ok(Some(o)),
-                _ => Ok(None),
-            }
-        })
+        let base_expr = expr.clone();
+        Ok(tys
+            .into_iter()
+            .fold(Ok(Some(expr.clone())), |acc, (index, ty)| {
+                self.fold_item(base_ty.clone(), &base_expr, ty, acc?, index)
+            })?)
     }
     pub fn emit_for_tys_exprs<'a>(
         &self,
@@ -288,6 +304,9 @@ impl Emitter for EmitContext<EmitMaxLen> {
     fn native_reference(&self) -> TokenStream {
         quote!(&)
     }
+    fn do_deref(&self, elem: &Self::Elem) -> Self::Elem {
+        parse_quote!(*#elem)
+    }
 }
 
 #[derive(PartialEq, Eq, Hash, Debug)]
@@ -302,9 +321,9 @@ impl Emitter for EmitContext<EmitMinLen> {
     fn item(&self, base_ty: &Type, index: usize, ty: &Type, expr: &Expr) -> Result<Option<Expr>> {
         if let Some(inner) = self.emit(ty, expr)? {
             let krate = &self.krate;
-            Ok(Some(parse_quote!(
-                (<#base_ty as #krate::Parametrized<#index>>::MIN_LEN * #inner)
-            )))
+            Ok(Some(
+                parse_quote!(<#base_ty as #krate::Parametrized<#index>>::MIN_LEN * #inner),
+            ))
         } else {
             Ok(None)
         }
@@ -329,6 +348,9 @@ impl Emitter for EmitContext<EmitMinLen> {
     fn native_reference(&self) -> TokenStream {
         quote!(&)
     }
+    fn do_deref(&self, elem: &Self::Elem) -> Self::Elem {
+        parse_quote!(*#elem)
+    }
 }
 
 fn fold_iter_like<T>(
@@ -342,7 +364,7 @@ fn fold_iter_like<T>(
     and: &TokenStream,
 ) -> Result<Option<Expr>>
 where
-    EmitContext<T>: Emitter,
+    EmitContext<T>: Emitter<Elem = Expr>,
     TokenStream: ParseQuote<<EmitContext<T> as Emitter>::Elem>,
 {
     let arg = Ident::new("__parametrized_arg", Span::call_site());
@@ -403,6 +425,9 @@ impl Emitter for EmitContext<EmitLen> {
     fn native_reference(&self) -> TokenStream {
         quote!(&)
     }
+    fn do_deref(&self, elem: &Self::Elem) -> Self::Elem {
+        parse_quote!(*#elem)
+    }
 }
 
 fn fold_iter_ty_like<T>(
@@ -425,10 +450,10 @@ where
         Ok(Some(parse_quote! {
             ::core::iter::Flatten<
                 ::core::iter::Map<
-                    <#base_ty as #krate::#trait_name<#index>>::#assoc_ty_name<#lt>,
-                    fn(#and #ty) -> #inner
-                >
-            >
+                <#base_ty as #krate::#trait_name<#index>>::#assoc_ty_name<#lt>,
+                fn(#and #ty) -> #inner
+                    >
+                        >
         }))
     } else {
         Ok(None)
@@ -482,6 +507,9 @@ impl Emitter for EmitContext<EmitIterTy> {
     fn native_reference(&self) -> TokenStream {
         quote!()
     }
+    fn do_deref(&self, _elem: &Self::Elem) -> Self::Elem {
+        unreachable!()
+    }
 }
 
 #[derive(PartialEq, Eq, Hash, Debug)]
@@ -524,6 +552,9 @@ impl Emitter for EmitContext<EmitIter> {
 
     fn native_reference(&self) -> TokenStream {
         quote!(&)
+    }
+    fn do_deref(&self, elem: &Self::Elem) -> Self::Elem {
+        parse_quote!(*#elem)
     }
 }
 
@@ -574,6 +605,9 @@ impl Emitter for EmitContext<EmitIterMutTy> {
     fn native_reference(&self) -> TokenStream {
         quote!()
     }
+    fn do_deref(&self, _elem: &Self::Elem) -> Self::Elem {
+        unreachable!()
+    }
 }
 
 #[derive(PartialEq, Eq, Hash, Debug)]
@@ -616,6 +650,9 @@ impl Emitter for EmitContext<EmitIterMut> {
 
     fn native_reference(&self) -> TokenStream {
         quote!(&mut)
+    }
+    fn do_deref(&self, elem: &Self::Elem) -> Self::Elem {
+        parse_quote!(*#elem)
     }
 }
 
@@ -665,6 +702,9 @@ impl Emitter for EmitContext<EmitIntoIterTy> {
     fn native_reference(&self) -> TokenStream {
         quote!()
     }
+    fn do_deref(&self, _elem: &Self::Elem) -> Self::Elem {
+        unreachable!()
+    }
 }
 
 #[derive(PartialEq, Eq, Hash, Debug)]
@@ -706,35 +746,65 @@ impl Emitter for EmitContext<EmitIntoIter> {
     fn native_reference(&self) -> TokenStream {
         quote!()
     }
+    fn do_deref(&self, _elem: &Self::Elem) -> Self::Elem {
+        unreachable!()
+    }
 }
 #[derive(PartialEq, Eq, Hash, Debug)]
-pub struct EmitMap;
+pub struct EmitMap(pub Ident, pub Ident);
 impl Emitter for EmitContext<EmitMap> {
-    type Elem = Expr;
-    fn fold_initializer(&self) -> Expr {
-        todo!()
+    type Elem = (Expr, Type);
+    fn fold_initializer(&self) -> (Expr, Type) {
+        unreachable!()
     }
 
-    fn emit_pure(&self, ty: &Type, expr: &Expr) -> Expr {
-        todo!()
+    fn emit_pure(&self, _ty: &Type, expr: &(Expr, Type)) -> (Expr, Type) {
+        let map_fn = &self.kind.0;
+        let expr = expr.clone().0;
+        let map_param = &self.kind.1;
+        (parse_quote!(#map_fn(#expr)), parse_quote!(#map_param))
     }
 
     fn access_over_ref(&self) -> bool {
-        todo!()
+        false
     }
 
     fn access_over_ref_mut(&self) -> bool {
-        todo!()
+        false
     }
     fn native_reference(&self) -> TokenStream {
         quote!()
     }
 
-    fn item(&self, base_ty: &Type, index: usize, ty: &Type, expr: &Expr) -> Result<Option<Expr>> {
-        todo!()
+    fn item(
+        &self,
+        base_ty: &Type,
+        index: usize,
+        ty: &Type,
+        (expr, acc_ty): &Self::Elem,
+    ) -> Result<Option<Self::Elem>> {
+        let krate = &self.krate;
+        let map_param = &self.kind.1;
+        let arg = Ident::new("__parametrized_arg", Span::call_site());
+        if let Some((inner_exp, inner_ty)) = self.emit(acc_ty, &(parse_quote!(#arg), ty.clone()))? {
+            Ok(Some((
+                parse_quote!(
+                    <#base_ty as #krate::ParametrizedMap<#index, #map_param>>::param_map(
+                        #expr,
+                        |#arg| { #inner_exp }
+                    )
+                ),
+                inner_ty,
+            )))
+        } else {
+            Ok(None)
+        }
     }
 
-    fn fold(&self, acc: &Expr, item: &Expr) -> Expr {
-        todo!()
+    fn fold(&self, _acc: &Self::Elem, _item: &Self::Elem) -> Self::Elem {
+        unreachable!()
+    }
+    fn do_deref(&self, (elem, ty): &Self::Elem) -> Self::Elem {
+        (parse_quote!(*#elem), ty.clone())
     }
 }

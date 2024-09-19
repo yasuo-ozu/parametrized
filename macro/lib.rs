@@ -60,6 +60,22 @@ fn squash_maxlens(outs: &[Expr]) -> Expr {
     }
 }
 
+fn replace_type(mut ty: Type, from: Type, to: Type) -> Type {
+    use syn::visit_mut::VisitMut;
+    struct Visitor(Type, Type);
+    impl VisitMut for Visitor {
+        fn visit_type_mut(&mut self, ty: &mut Type) {
+            if ty == &self.0 {
+                *ty = self.1.clone();
+            } else {
+                syn::visit_mut::visit_type_mut(self, ty)
+            }
+        }
+    }
+    Visitor(from, to).visit_type_mut(&mut ty);
+    ty
+}
+
 impl TraitTarget {
     fn make_enough(mut set: HashSet<Self>) -> HashSet<Self> {
         if set.contains(&Self::Map) {
@@ -84,6 +100,7 @@ impl TraitTarget {
         self_val: &Ident,
         tys_exprs: &[Vec<(Type, Expr)>],
         mut f: impl FnMut(&[TokenStream]) -> TokenStream,
+        mut emit_map_f: impl FnMut(&[Vec<Expr>]) -> TokenStream,
         needs_ref: bool,
     ) -> Result<TokenStream> {
         let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
@@ -325,7 +342,7 @@ impl TraitTarget {
                     #(if tys_exprs.len() > 1) {
                         #[#krate::_imp::sumtype]
                     }
-                    impl #impl_generics #krate::ParametrizedIntoIter<#param_index> for #ident #ty_generics #where_clause {
+                    impl #krate::ParametrizedIntoIter<#param_index> for #ident #ty_generics #where_clause {
                         #(if tys_exprs.len() > 1) {
                             type IntoIter = sumtype![];
                         } #(else) {
@@ -339,27 +356,38 @@ impl TraitTarget {
                 })
             }
             Self::Map => {
+                let map_fn: Ident = parse_quote!(__parametrized_map_fn);
+                let mapped_param: Ident = parse_quote!(__PARAMETRIZED_MAP_PARAM);
                 let out_map = tys_exprs
                     .iter()
                     .map(|item| {
-                        generator::EmitContext {
-                            kind: generator::EmitMap,
-                            krate: krate.clone(),
-                            replacing_ty: replacing_ty.clone(),
-                        }
-                        .emit_for_tys_exprs(item.iter().map(|(a, b)| (a.clone(), b.clone())))
+                        Ok(item
+                            .iter()
+                            .map(|(a, b)| {
+                                generator::EmitContext {
+                                    kind: generator::EmitMap(map_fn.clone(), mapped_param.clone()),
+                                    krate: krate.clone(),
+                                    replacing_ty: replacing_ty.clone(),
+                                }
+                                .emit(a, &(b.clone(), a.clone()))
+                            })
+                            .collect::<Result<Option<Vec<_>>>>()?
+                            .unwrap_or_else(|| {
+                                abort!(Span::call_site(), "Cannot implement map method")
+                            }))
                     })
-                    .collect::<Result<Option<Vec<_>>>>()?
-                    .unwrap_or_else(|| abort!(Span::call_site(), "Cannot implement map method"))
-                    .into_iter()
-                    .map(|expr| quote!(#expr))
-                    .collect::<Vec<_>>();
+                    .collect::<Result<Vec<_>>>()?;
+                let mapped = replace_type(
+                    parse_quote!(#ident #ty_generics),
+                    replacing_ty.clone(),
+                    parse_quote!(#mapped_param),
+                );
                 Ok(quote! {
-                    impl #impl_generics #krate::ParametrizedIntoIter<#param_index> for #ident #ty_generics #where_clause {
-                        type IntoIter = todo!();
-                        fn param_into_iter(#self_val) -> Self::IntoIter
+                    impl <#(for p in &generics.params){ #p, } #mapped_param> #krate::ParametrizedMap<#param_index, #mapped_param> for #ident #ty_generics #where_clause {
+                        type Mapped = #mapped;
+                        fn param_map(#self_val, #map_fn) -> Self::Mapped
                         {
-                            #{f(out_map.as_slice())}
+                            #{emit_map_f(out_map.iter().map(|a| a.iter().map(|(a, b)| a.clone()).collect::<Vec<_>>()).collect::<Vec<_>>().as_slice())}
                         }
                     }
                 })
@@ -497,8 +525,18 @@ impl ImplTarget for ItemStruct {
             &self_val,
             &[tys_exprs],
             |inner| {
+                quote! { #(#inner)* }
+            },
+            |items| {
                 quote! {
-                    #(#inner)*
+                    #{&self.ident}
+                    #(if let Fields::Named(_) = &self.fields) {
+                        {#(for (inner, field) in items[0].iter().zip(&self.fields)) {
+                            #{&field.ident} : #inner,
+                        }}
+                    } #(else) {
+                        ( #(for inner in items[0].iter()) { #inner })
+                    }
                 }
             },
             true,
@@ -564,6 +602,32 @@ impl ImplTarget for ItemEnum {
                                     ( #(#idents),* )
                                 }
                             => { #inner }
+                        }
+                    }
+                }
+            },
+            |items| {
+                quote! {
+                    match #self_val {
+                        #(for ((variant, inner), idents) in self
+                            .variants.iter().zip(items).zip(&variant_idents)
+                        ) {
+                            #{&self.ident}::#{&variant.ident}
+                                #(if let Fields::Named(_) = &variant.fields) {
+                                    { #(#idents),*  }
+                                }
+                                #(if let Fields::Unnamed(_) = &variant.fields) {
+                                    ( #(#idents),* )
+                                }
+                            => {
+                                #{&self.ident}::#{&variant.ident}
+                                #(if let Fields::Named(_) = &variant.fields) {
+                                    { #(#inner),*  }
+                                }
+                                #(if let Fields::Unnamed(_) = &variant.fields) {
+                                    ( #(#inner),* )
+                                }
+                            }
                         }
                     }
                 }
