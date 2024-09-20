@@ -380,8 +380,30 @@ impl TraitTarget {
                     replacing_ty.clone(),
                     parse_quote!(#mapped_param),
                 );
+                let mapped_param_impl_generics = generics
+                    .params
+                    .iter()
+                    .filter_map(|p| {
+                        if let GenericParam::Type(p) = p {
+                            let ident = &p.ident;
+                            if &parse_quote!(#ident) as &Type == replacing_ty {
+                                let mut p = p.clone();
+                                p.ident = mapped_param.clone();
+                                Some(quote!(#p))
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .next()
+                    .unwrap_or(quote!(#mapped_param));
                 Ok(quote! {
-                    impl <#(for p in &generics.params){ #p, } #mapped_param> #krate::ParametrizedMap<#param_index, #mapped_param> for #ident #ty_generics #where_clause {
+                    impl <
+                        #(for p in &generics.params){ #p, }
+                        #mapped_param_impl_generics
+                    > #krate::ParametrizedMap<#param_index, #mapped_param> for #ident #ty_generics #where_clause {
                         type Mapped = #mapped;
                         fn param_map(#self_val, mut #map_fn: impl FnMut(Self::Item) -> #mapped_param) -> Self::Mapped
                         where

@@ -764,12 +764,12 @@ impl Emitter for EmitContext<EmitMap> {
             parse_quote!(#map_param),
         );
         let arg = Ident::new("__parametrized_arg", Span::call_site());
+        let expr = if let Some((expr1, _)) = elem {
+            expr1
+        } else {
+            expr0.clone()
+        };
         if let Some((inner_exp, inner_ty)) = self.emit(ty, &(parse_quote!(#arg), ty.clone()))? {
-            let expr = if let Some((expr1, _)) = elem {
-                expr1
-            } else {
-                expr0.clone()
-            };
             Ok(Some((
                 parse_quote!(
                     <#base_ty as #krate::ParametrizedMap<
@@ -783,7 +783,7 @@ impl Emitter for EmitContext<EmitMap> {
                 inner_ty,
             )))
         } else {
-            Ok(None)
+            Ok(Some((expr, ty.clone())))
         }
     }
 

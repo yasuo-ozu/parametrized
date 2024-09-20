@@ -17,17 +17,18 @@ The parametrized library is particularly well-suited for handling complex data s
 
 ```rust
 # use parametrized::*;
+# use std::collections::BTreeSet;
 # #[allow(unused)]
-#[parametrized(default, iter_mut, into_iter, map)]
-enum Instruction<Operand> {
+#[parametrized(default, into_iter, map)]
+enum Instruction<Operand: Ord> {
     BinaryOp {
         _op: String,
         _src: Operand,
-        _dest: Operand,
+        _dest: BTreeSet<Operand>,
     },
     LoadStore {
         _op: String,
-        _address: Operand,
+        _address: Vec<(Operand, bool)>,
         _value: Operand,
     },
     Branch {
