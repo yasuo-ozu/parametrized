@@ -24,7 +24,7 @@ fn squash_minlens(outs: &[Expr]) -> Expr {
     }
     let mut acc = outs[outs.len() - 1].clone();
     if outs.len() >= 2 {
-        for out in outs[0..(outs.len() - 2)].iter().rev() {
+        for out in outs[0..(outs.len() - 1)].iter().rev() {
             acc = parse_quote! {__parametric_type_min(#out, #acc)};
         }
     }
@@ -43,7 +43,7 @@ fn squash_maxlens(outs: &[Expr]) -> Expr {
     }
     let mut acc = outs[outs.len() - 1].clone();
     if outs.len() >= 2 {
-        for out in outs[0..(outs.len() - 2)].iter().rev() {
+        for out in outs[0..(outs.len() - 1)].iter().rev() {
             acc = parse_quote! {__parametric_type_max(#out, #acc)};
         }
     }
@@ -380,7 +380,6 @@ impl TraitTarget {
                     replacing_ty.clone(),
                     parse_quote!(#mapped_param),
                 );
-                eprintln!("emit_map_f = [{}]", emit_map_f(out_map.as_slice()));
                 Ok(quote! {
                     impl <#(for p in &generics.params){ #p, } #mapped_param> #krate::ParametrizedMap<#param_index, #mapped_param> for #ident #ty_generics #where_clause {
                         type Mapped = #mapped;
@@ -623,7 +622,11 @@ impl ImplTarget for ItemEnum {
                             => {
                                 #{&self.ident}::#{&variant.ident}
                                 #(if let Fields::Named(_) = &variant.fields) {
-                                    { #(#inner),*  }
+                                    {
+                                        #(for (ident, inner) in idents.iter().zip(inner)) {
+                                            #ident: #inner,
+                                        }
+                                    }
                                 }
                                 #(if let Fields::Unnamed(_) = &variant.fields) {
                                     ( #(#inner),* )

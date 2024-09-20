@@ -1,7 +1,11 @@
 [package]
 name = "parametrized"
+description = "Supply useful iterating methods for user-defined types which are parametrized by type parameters"
 version = "0.1.0"
+repository = "https://github.com/yasuo-ozu/parametrized"
 edition = "2021"
+categories = ["data-structures", "no-std::no-alloc", "rust-patterns"]
+license = "MIT"
 
 [lib]
 path = "lib.rs"

@@ -1,6 +1,30 @@
+#![doc = include_str!("README.md")]
+
+/// Implement traits defined in [`parametrized`] crate, specifified by
+/// comma-separated arguments to this attribute macro `#[parametrized(<args>)]`.
+///
+/// - `default` ... implements [`Parametrized`]
+/// - `iter_mut` ... implements [`ParametrizedIterMut`]
+/// - `into_iter` ... implements [`ParametrizedIntoIter`]
+/// - `map` ... implements [`ParametrizedMap`]
+///
+/// You can specify `PARAM` index by using `<arg> = [<PARAM>, ..]` syntax.
 pub use parametrized_macro::parametrized;
 use std::hash::Hash;
 
+/// Provide method to iterate about `PARAM`-th type parameter. For user-defined types,
+/// this trait is implemented by [`parametrized`] macro with `default` argument.
+///
+/// ```
+/// # use parametrized::*;
+/// #[parametrized(default)]
+/// struct S<T>(Vec<T>, T);
+/// let s = S(vec![1usize, 2usize], 3usize);
+/// assert_eq!(<S<usize>>::MIN_LEN, 1);
+/// assert_eq!(<S<usize>>::MAX_LEN, None);
+/// assert_eq!(s.param_len(), 3);
+/// assert_eq!(s.param_iter().collect::<Vec<_>>(), vec![&1usize, &2, &3]);
+/// ```
 pub trait Parametrized<const PARAM: usize> {
     type Item: ?Sized;
     const MIN_LEN: usize;
@@ -16,6 +40,25 @@ pub trait Parametrized<const PARAM: usize> {
         Self::Item: 'a;
 }
 
+/// Provide [`ParametrizedIterMut::param_iter_mut()`] method to return mutable
+/// iterator, that iterates the `PARAM`-th type parameter of given type.
+///
+/// ```
+/// # use parametrized::*;
+/// #[parametrized(iter_mut)]
+/// enum E<T> {
+///     E1(T),
+///     E2([T; 3], T)
+/// }
+/// assert_eq!(<E<usize>>::MIN_LEN, 1);
+/// assert_eq!(<E<usize>>::MAX_LEN, Some(4));
+/// let mut e1 = E::E1(1usize);
+/// e1.param_iter_mut().for_each(|i| {*i *= 3;});
+/// assert_eq!(e1.param_iter().collect::<Vec<_>>(), vec![&3usize]);
+/// let mut e2 = E::E2([1usize, 2, 3], 4);
+/// e2.param_iter_mut().for_each(|i| {*i *= 3;});
+/// assert_eq!(e2.param_iter().collect::<Vec<_>>(), vec![&3usize, &6, &9, &12]);
+/// ```
 pub trait ParametrizedIterMut<const PARAM: usize>: Parametrized<PARAM> {
     type IterMut<'a>: Iterator<Item = &'a mut Self::Item>
     where
@@ -25,6 +68,20 @@ pub trait ParametrizedIterMut<const PARAM: usize>: Parametrized<PARAM> {
         Self::Item: 'a;
 }
 
+/// Provide [`ParametrizedIntoIter::param_into_iter()`] method to return iterator that
+/// consumes and iterates the `PARAM`-th type parameter of given type.
+///
+/// ```
+/// # use parametrized::*;
+/// #[derive(PartialEq, Clone, Debug)]
+/// struct Elem(usize);
+/// #[parametrized(into_iter)]
+/// struct S<T>(Vec<T>);
+/// 
+/// let v = vec![Elem(1), Elem(2), Elem(3)];
+/// let s = S(v.clone());
+/// assert_eq!(s.param_into_iter().collect::<Vec<_>>(), v);
+/// ```
 pub trait ParametrizedIntoIter<const PARAM: usize>: Parametrized<PARAM> + Sized {
     type IntoIter: Iterator<Item = Self::Item>
     where
@@ -34,6 +91,21 @@ pub trait ParametrizedIntoIter<const PARAM: usize>: Parametrized<PARAM> + Sized 
         Self::Item: Sized;
 }
 
+/// Provide [`ParametrizedMap::param_map()`] method to map values specified by
+/// `PARAM`-th type parameter of given type.
+///
+/// ```
+/// # use parametrized::*;
+/// #[parametrized(map)]
+/// struct S<T>(Vec<T>);
+/// 
+/// let s = S(vec![1usize, 2, 3]).param_map(|s| s.to_string());
+/// assert_eq!(s.param_iter().collect::<Vec<_>>(), vec![
+///     &"1".to_string(),
+///     &"2".to_string(),
+///     &"3".to_string(),
+/// ]);
+/// ```
 pub trait ParametrizedMap<const PARAM: usize, K>: ParametrizedIntoIter<PARAM> + Sized {
     type Mapped: ParametrizedIntoIter<PARAM, Item = K>;
     fn param_map(self, f: impl FnMut(Self::Item) -> K) -> Self::Mapped
@@ -466,7 +538,40 @@ impl_all! {
         T = M, Mapped = std::collections::LinkedList<M>;
     [T] map, into_iter, iter_mut for std::collections::VecDeque<T>,
         T = M, Mapped = std::collections::VecDeque<M>;
-    [const N: usize, T] into_iter, iter_mut for [T; N];
+}
+
+impl<const N: usize, T> ParametrizedIntoIter<0> for [T; N] {
+    type IntoIter = <Self as IntoIterator>::IntoIter;
+    fn param_into_iter(self) -> Self::IntoIter {
+        <Self as IntoIterator>::into_iter(self)
+    }
+}
+impl<const N: usize, T> ParametrizedIterMut<0> for [T; N] {
+    type IterMut<'a> = <&'a mut Self as IntoIterator>::IntoIter
+    where
+        (Self, Self::Item): 'a;
+    fn param_iter_mut<'a>(&'a mut self) -> Self::IterMut<'a>
+    where
+        Self::Item: 'a,
+    {
+        <&'a mut Self as IntoIterator>::into_iter(self)
+    }
+}
+impl<const N: usize, T> Parametrized<0> for [T; N] {
+    type Item = <Self as IntoIterator>::Item;
+    const MIN_LEN: usize = N;
+    const MAX_LEN: Option<usize> = Some(N);
+    fn param_len(&self) -> usize {
+        self.len()
+    }
+    type Iter<'a> = <&'a Self as IntoIterator>::IntoIter where (Self, Self::Item): 
+'a;
+    fn param_iter<'a>(&'a self) -> Self::Iter<'a>
+    where
+        Self::Item: 'a,
+    {
+        <&'a Self as IntoIterator>::into_iter(self)
+    }
 }
 
 impl<T, M: Ord> ParametrizedMap<0, M> for std::collections::BTreeSet<T> {

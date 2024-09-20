@@ -284,7 +284,7 @@ impl Emitter for EmitContext<EmitMaxLen> {
     }
 
     fn emit_pure(&self, _ty: &Type, _expr: &Expr) -> Expr {
-        parse_quote!(::core::option::Option::Some(0usize))
+        parse_quote!(::core::option::Option::Some(1usize))
     }
 
     fn access_over_ref(&self) -> bool {
@@ -740,34 +740,18 @@ impl Emitter for EmitContext<EmitMap> {
 
     fn item(
         &self,
-        base_ty: &Type,
-        index: usize,
-        ty: &Type,
-        (expr, acc_ty): &Self::Elem,
+        _base_ty: &Type,
+        _index: usize,
+        _ty: &Type,
+        _: &Self::Elem,
     ) -> Result<Option<Self::Elem>> {
-        panic!()
-        // let krate = &self.krate;
-        // let map_param = &self.kind.1;
-        // let arg = Ident::new("__parametrized_arg", Span::call_site());
-        // if let Some((inner_exp, inner_ty)) = self.emit(acc_ty, &(parse_quote!(#arg), ty.clone()))? {
-        //     Ok(Some((
-        //         parse_quote!(
-        //             <#base_ty as #krate::ParametrizedMap<#index, #map_param>>::param_map(
-        //                 #expr,
-        //                 |#arg| { #inner_exp }
-        //             )
-        //         ),
-        //         inner_ty,
-        //     )))
-        // } else {
-        //     Ok(None)
-        // }
+        unreachable!()
     }
 
     fn fold_item(
         &self,
         base_ty: Type,
-        (expr0, ty0): &<Self as Emitter>::Elem,
+        (expr0, _): &<Self as Emitter>::Elem,
         ty: &Type,
         elem: Option<<Self as Emitter>::Elem>,
         index: usize,
