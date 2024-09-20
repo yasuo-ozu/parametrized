@@ -574,6 +574,40 @@ impl<const N: usize, T> Parametrized<0> for [T; N] {
     }
 }
 
+impl<T> ParametrizedIntoIter<0> for Box<T> {
+    type IntoIter = core::iter::Once<T>;
+    fn param_into_iter(self) -> Self::IntoIter {
+        core::iter::once(*self)
+    }
+}
+impl<T> ParametrizedIterMut<0> for Box<T> {
+    type IterMut<'a> = core::iter::Once<&'a mut T>
+    where
+        (Self, Self::Item): 'a;
+    fn param_iter_mut<'a>(&'a mut self) -> Self::IterMut<'a>
+    where
+        Self::Item: 'a,
+    {
+        core::iter::once(&mut *self)
+    }
+}
+impl< T> Parametrized<0> for Box<T> {
+    type Item = T;
+    const MIN_LEN: usize = 1;
+    const MAX_LEN: Option<usize> = Some(1);
+    fn param_len(&self) -> usize {
+        1
+    }
+    type Iter<'a> = core::iter::Once<&'a T> where (Self, Self::Item): 
+'a;
+    fn param_iter<'a>(&'a self) -> Self::Iter<'a>
+    where
+        Self::Item: 'a,
+    {
+        core::iter::once(self.as_ref())
+    }
+}
+
 impl<T, M: Ord> ParametrizedMap<0, M> for std::collections::BTreeSet<T> {
     type Mapped = std::collections::BTreeSet<M>;
     fn param_map(self, f: impl FnMut(Self::Item) -> M) -> Self::Mapped
@@ -749,7 +783,7 @@ impl<T> ParametrizedIterMut<0> for Option<T> {
 impl<T> Parametrized<0> for Option<T> {
     type Item = T;
     const MIN_LEN: usize = 0;
-    const MAX_LEN: Option<usize> = Some(1);
+    const MAX_LEN: Option<usize> = None;
     fn param_len(&self) -> usize {
         self.is_some() as usize
     }
