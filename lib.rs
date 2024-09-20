@@ -749,7 +749,7 @@ impl<T> ParametrizedIterMut<0> for Option<T> {
 impl<T> Parametrized<0> for Option<T> {
     type Item = T;
     const MIN_LEN: usize = 0;
-    const MAX_LEN: Option<usize> = None;
+    const MAX_LEN: Option<usize> = Some(1);
     fn param_len(&self) -> usize {
         self.is_some() as usize
     }
