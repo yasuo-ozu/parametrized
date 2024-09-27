@@ -687,13 +687,11 @@ fn inner_target<T: ImplTarget + ToTokens>(target: &T, arg: Arguments) -> TokenSt
 }
 
 fn inner(arg: Arguments, input: Item) -> TokenStream {
-    let ret = match input {
+    match input {
         Item::Enum(item_enum) => inner_target(&item_enum, arg),
         Item::Struct(item_struct) => inner_target(&item_struct, arg),
         _ => abort!(input.span(), "Bad item"),
-    };
-    eprintln!("ret = {}", &ret);
-    ret
+    }
 }
 
 #[proc_macro_error]

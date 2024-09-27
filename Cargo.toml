@@ -1,7 +1,7 @@
 [package]
 name = "parametrized"
 description = "Supply useful iterating methods for user-defined types which are parametrized by type parameters"
-version = "0.1.1"
+version = "0.1.2"
 repository = "https://github.com/yasuo-ozu/parametrized"
 edition = "2021"
 categories = ["data-structures", "no-std::no-alloc", "rust-patterns"]
@@ -14,7 +14,7 @@ path = "lib.rs"
 large-tuples = []
 
 [dependencies]
-parametrized-macro = { version = "0.1.1", path = "macro" }
+parametrized-macro = { version = "0.1.2", path = "macro" }
 sumtype = "0.2.1"
 
 [workspace]
