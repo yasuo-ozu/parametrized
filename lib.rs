@@ -77,7 +77,7 @@ pub trait ParametrizedIterMut<const PARAM: usize>: Parametrized<PARAM> {
 /// struct Elem(usize);
 /// #[parametrized(into_iter)]
 /// struct S<T>(Vec<T>);
-/// 
+///
 /// let v = vec![Elem(1), Elem(2), Elem(3)];
 /// let s = S(v.clone());
 /// assert_eq!(s.param_into_iter().collect::<Vec<_>>(), v);
@@ -98,7 +98,7 @@ pub trait ParametrizedIntoIter<const PARAM: usize>: Parametrized<PARAM> + Sized 
 /// # use parametrized::*;
 /// #[parametrized(map)]
 /// struct S<T>(Vec<T>);
-/// 
+///
 /// let s = S(vec![1usize, 2, 3]).param_map(|s| s.to_string());
 /// assert_eq!(s.param_iter().collect::<Vec<_>>(), vec![
 ///     &"1".to_string(),
@@ -111,6 +111,38 @@ pub trait ParametrizedMap<const PARAM: usize, K>: ParametrizedIntoIter<PARAM> + 
     fn param_map(self, f: impl FnMut(Self::Item) -> K) -> Self::Mapped
     where
         Self::Item: Sized;
+}
+
+/// Like [`std::iter::Flatten`], but no where clauses in type definitions.
+#[doc(hidden)]
+pub struct Flatten<I, Iter> {
+    slot: I,
+    iter: Option<Iter>,
+}
+
+impl<I, OuterItem> Flatten<I, OuterItem> {
+    pub fn new(slot: I) -> Self {
+        Flatten { slot, iter: None }
+    }
+}
+
+impl<I, Iter, T> Iterator for Flatten<I, Iter>
+where
+    I: Iterator,
+    <I as Iterator>::Item: IntoIterator<IntoIter = Iter, Item = T>,
+    Iter: Iterator<Item = T>,
+{
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(iter) = &mut self.iter {
+            if let Some(item) = iter.next() {
+                return Some(item);
+            }
+        }
+        self.iter = Some(self.slot.next()?.into_iter());
+        self.next()
+    }
 }
 
 impl<'a, const PARAM: usize, T> Parametrized<PARAM> for &'a T
@@ -564,8 +596,8 @@ impl<const N: usize, T> Parametrized<0> for [T; N] {
     fn param_len(&self) -> usize {
         self.len()
     }
-    type Iter<'a> = <&'a Self as IntoIterator>::IntoIter where (Self, Self::Item): 
-'a;
+    type Iter<'a> = <&'a Self as IntoIterator>::IntoIter
+    where (Self, Self::Item): 'a;
     fn param_iter<'a>(&'a self) -> Self::Iter<'a>
     where
         Self::Item: 'a,
@@ -591,15 +623,15 @@ impl<T> ParametrizedIterMut<0> for Box<T> {
         core::iter::once(&mut *self)
     }
 }
-impl< T> Parametrized<0> for Box<T> {
+impl<T> Parametrized<0> for Box<T> {
     type Item = T;
     const MIN_LEN: usize = 1;
     const MAX_LEN: Option<usize> = Some(1);
     fn param_len(&self) -> usize {
         1
     }
-    type Iter<'a> = core::iter::Once<&'a T> where (Self, Self::Item): 
-'a;
+    type Iter<'a> = core::iter::Once<&'a T>
+    where (Self, Self::Item): 'a;
     fn param_iter<'a>(&'a self) -> Self::Iter<'a>
     where
         Self::Item: 'a,
@@ -939,5 +971,5 @@ impl<L: Hash + Eq, K: Hash + Eq, V> ParametrizedMap<1, L> for std::collections::
 
 #[doc(hidden)]
 pub mod _imp {
-    pub use sumtype::sumtype;
+    pub use sumtype::{sumtype, traits};
 }

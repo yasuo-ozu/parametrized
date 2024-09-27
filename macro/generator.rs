@@ -364,9 +364,10 @@ where
         Ok(Some(parse_quote! {
             {
                 let __parametrized_fn: fn(#and #ty) -> _ = |#arg| {#inner};
-                <#base_ty as #krate::#trait_name<#index>>::#fn_name(#expr)
+                #krate::Flatten::new(
+                    <#base_ty as #krate::#trait_name<#index>>::#fn_name(#expr)
                     .map(__parametrized_fn)
-                    .flatten()
+                )
             }
         }))
     } else {
@@ -436,12 +437,13 @@ where
     if let Some(inner) = ctx.emit(ty, expr)? {
         let krate = &ctx.krate;
         Ok(Some(parse_quote! {
-            ::core::iter::Flatten<
+            #krate::Flatten<
                 ::core::iter::Map<
-                <#base_ty as #krate::#trait_name<#index>>::#assoc_ty_name<#lt>,
-                fn(#and #ty) -> #inner
-                    >
-                        >
+                    <#base_ty as #krate::#trait_name<#index>>::#assoc_ty_name<#lt>,
+                    fn(#and #ty) -> #inner
+                >,
+                #inner
+            >
         }))
     } else {
         Ok(None)
@@ -638,11 +640,12 @@ impl Emitter for EmitContext<EmitIntoIterTy> {
         if let Some(inner) = self.emit(ty, expr)? {
             let krate = &self.krate;
             Ok(Some(parse_quote! {
-                ::core::iter::Flatten<
+                #krate::Flatten<
                     ::core::iter::Map<
                         <#base_ty as #krate::ParametrizedIntoIter<#index>>::IntoIter,
                         fn(#ty) -> #inner
-                    >
+                    >,
+                    #inner
                 >
             }))
         } else {

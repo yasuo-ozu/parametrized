@@ -213,7 +213,7 @@ impl TraitTarget {
                     .collect::<Vec<_>>();
                 Ok(quote! {
                     #(if tys_exprs.len() > 1) {
-                        #[#krate::_imp::sumtype]
+                        #[#krate::_imp::sumtype(#krate::_imp::traits::Iterator)]
                     }
                     impl #impl_generics #krate::Parametrized<#param_index> for #ident
                     #ty_generics #where_clause {
@@ -284,7 +284,7 @@ impl TraitTarget {
                     .collect::<Vec<_>>();
                 Ok(quote! {
                     #(if tys_exprs.len() > 1) {
-                        #[#krate::_imp::sumtype]
+                        #[#krate::_imp::sumtype(#krate::_imp::traits::Iterator)]
                     }
                     impl #impl_generics #krate::ParametrizedIterMut<#param_index> for #ident #ty_generics #where_clause {
                         #(if tys_exprs.len() > 1) {
@@ -340,7 +340,7 @@ impl TraitTarget {
                     .collect::<Vec<_>>();
                 Ok(quote! {
                     #(if tys_exprs.len() > 1) {
-                        #[#krate::_imp::sumtype]
+                        #[#krate::_imp::sumtype(#krate::_imp::traits::Iterator)]
                     }
                     impl #impl_generics #krate::ParametrizedIntoIter<#param_index> for #ident #ty_generics #where_clause {
                         #(if tys_exprs.len() > 1) {
@@ -687,11 +687,13 @@ fn inner_target<T: ImplTarget + ToTokens>(target: &T, arg: Arguments) -> TokenSt
 }
 
 fn inner(arg: Arguments, input: Item) -> TokenStream {
-    match input {
+    let ret = match input {
         Item::Enum(item_enum) => inner_target(&item_enum, arg),
         Item::Struct(item_struct) => inner_target(&item_struct, arg),
         _ => abort!(input.span(), "Bad item"),
-    }
+    };
+    eprintln!("ret = {}", &ret);
+    ret
 }
 
 #[proc_macro_error]

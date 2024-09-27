@@ -15,7 +15,7 @@ large-tuples = []
 
 [dependencies]
 parametrized-macro = { version = "0.1.1", path = "macro" }
-sumtype = "0.1.5"
+sumtype = "0.2.1"
 
 [workspace]
 members = [".", "macro"]
