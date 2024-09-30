@@ -551,6 +551,7 @@ impl ImplTarget for ItemStruct {
             },
             |items| {
                 quote! {
+                    #[allow(unused)]
                     #{&self.ident}
                     #(if let Fields::Named(_) = &self.fields) {
                         {#(for (inner, field) in items[0].iter().zip(&self.fields)) {
@@ -612,6 +613,7 @@ impl ImplTarget for ItemEnum {
             variant_items.as_slice(),
             |inner| {
                 quote! {
+                    #[allow(unused)]
                     match #self_val {
                         #(for ((variant, inner), idents) in self
                             .variants.iter().zip(inner).zip(&variant_idents)

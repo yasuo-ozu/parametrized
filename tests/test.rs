@@ -1,6 +1,5 @@
 use parametrized::*;
 
-#[allow(unused)]
 #[parametrized(default, iter_mut, map)]
 struct Struct1<K>(usize, Vec<(usize, K)>);
 
