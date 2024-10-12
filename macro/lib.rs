@@ -113,7 +113,6 @@ impl TraitTarget {
                             kind: generator::EmitLen,
                             krate: krate.clone(),
                             replacing_ty: replacing_ty.clone(),
-                            where_clause: Default::default(),
                         }
                         .emit_for_tys_exprs(item.iter().map(|(a, b)| {
                             (
@@ -138,7 +137,6 @@ impl TraitTarget {
                             kind: generator::EmitMaxLen,
                             krate: krate.clone(),
                             replacing_ty: replacing_ty.clone(),
-                            where_clause: Default::default(),
                         }
                         .emit_for_tys_exprs(item.iter().map(|(a, b)| {
                             (
@@ -160,7 +158,6 @@ impl TraitTarget {
                             kind: generator::EmitMinLen,
                             krate: krate.clone(),
                             replacing_ty: replacing_ty.clone(),
-                            where_clause: Default::default(),
                         }
                         .emit_for_tys_exprs(item.iter().map(|(a, b)| {
                             (
@@ -183,7 +180,6 @@ impl TraitTarget {
                             kind: generator::EmitIterTy(iter_ty_lt.clone(), replacing_ty.clone()),
                             krate: krate.clone(),
                             replacing_ty: replacing_ty.clone(),
-                            where_clause: Default::default(),
                         }
                         .emit_for_tys_exprs(
                             item.iter().map(|(a, _)| (a.clone(), replacing_ty.clone())),
@@ -191,46 +187,25 @@ impl TraitTarget {
                         .unwrap_or(parse_quote!(::core::iter::Empty<&#iter_ty_lt #replacing_ty>)))
                     })
                     .collect::<Result<Vec<_>>>()?;
-                let (exprs_iter, exprs_where_clauses) = tys_exprs.iter().fold(
-                    Ok((Vec::new(), HashSet::new())),
-                    |acc, item| -> Result<_> {
-                        let (mut exprs, mut where_clauses) = acc?;
-                        let mut ctx = generator::EmitContext {
+                let out_iter = tys_exprs
+                    .iter()
+                    .map(|item| {
+                        Ok(generator::EmitContext {
                             kind: generator::EmitIter,
                             krate: krate.clone(),
                             replacing_ty: replacing_ty.clone(),
-                            where_clause: Default::default(),
-                        };
-                        let expr = ctx
-                            .emit_for_tys_exprs(item.iter().map(|(a, b)| {
-                                (
-                                    a.clone(),
-                                    if needs_ref {
-                                        parse_quote!(&#b)
-                                    } else {
-                                        parse_quote!(#b)
-                                    },
-                                )
-                            }))?
-                            .unwrap_or(parse_quote!(::core::iter::empty()));
-                        exprs.push(expr);
-                        where_clauses.extend(ctx.where_clause);
-                        Ok((exprs, where_clauses))
-                    },
-                )?;
-                let exprs_where_clauses = exprs_where_clauses.into_iter().collect::<Vec<_>>();
-                let out_iter = exprs_iter
+                        }
+                        .emit_for_tys_exprs(
+                            item.iter().map(|(a, b)| (a.clone(), if needs_ref{parse_quote!(&#b)}else{parse_quote!(#b)})),
+                        )?
+                        .unwrap_or(parse_quote!(::core::iter::empty())))
+                    })
+                    .collect::<Result<Vec<_>>>()?
                     .into_iter()
                     .zip(&out_iter_ty)
                     .map(|(expr, ty)| {
                         if tys_exprs.len() > 1 {
-                            quote!(sumtype!(
-                                #expr,
-                                for<#iter_ty_lt> #ty
-                                where
-                                    #replacing_ty: #iter_ty_lt,
-                                    #(#exprs_where_clauses,)*
-                            ))
+                            quote!(sumtype!(#expr, for<#iter_ty_lt> #ty where #replacing_ty: #iter_ty_lt))
                         } else {
                             quote!(#expr)
                         }
@@ -274,7 +249,6 @@ impl TraitTarget {
                             ),
                             krate: krate.clone(),
                             replacing_ty: replacing_ty.clone(),
-                            where_clause: Default::default(),
                         }
                         .emit_for_tys_exprs(
                             item.iter().map(|(a, _)| (a.clone(), replacing_ty.clone())),
@@ -284,46 +258,25 @@ impl TraitTarget {
                         ))
                     })
                     .collect::<Result<Vec<_>>>()?;
-                let (exprs_iter_mut, exprs_where_clauses) = tys_exprs.iter().fold(
-                    Ok((Vec::new(), HashSet::new())),
-                    |acc, item| -> Result<_> {
-                        let (mut exprs, mut where_clauses) = acc?;
-                        let mut ctx = generator::EmitContext {
+                let out_iter_mut = tys_exprs
+                    .iter()
+                    .map(|item| {
+                        Ok(generator::EmitContext {
                             kind: generator::EmitIterMut,
                             krate: krate.clone(),
                             replacing_ty: replacing_ty.clone(),
-                            where_clause: Default::default(),
-                        };
-                        let expr = ctx
-                            .emit_for_tys_exprs(item.iter().map(|(a, b)| {
-                                (
-                                    a.clone(),
-                                    if needs_ref {
-                                        parse_quote!(&mut #b)
-                                    } else {
-                                        parse_quote!(#b)
-                                    },
-                                )
-                            }))?
-                            .unwrap_or(parse_quote!(::core::iter::empty()));
-                        exprs.push(expr);
-                        where_clauses.extend(ctx.where_clause);
-                        Ok((exprs, where_clauses))
-                    },
-                )?;
-                let exprs_where_clauses = exprs_where_clauses.into_iter().collect::<Vec<_>>();
-                let out_iter_mut = exprs_iter_mut
+                        }
+                        .emit_for_tys_exprs(
+                            item.iter().map(|(a, b)| (a.clone(), if needs_ref{parse_quote!(&mut #b)}else{parse_quote!(#b)})),
+                        )?
+                        .unwrap_or(parse_quote!(::core::iter::empty())))
+                    })
+                    .collect::<Result<Vec<_>>>()?
                     .into_iter()
                     .zip(&out_iter_mut_ty)
                     .map(|(expr, ty)| {
                         if tys_exprs.len() > 1 {
-                            quote!(sumtype!(
-                            #expr,
-                            for<#iter_ty_lt> #ty
-                            where
-                                #replacing_ty: #iter_ty_lt,
-                                #(#exprs_where_clauses,)*
-                            ))
+                            quote!(sumtype!(#expr, for<#iter_ty_lt> #ty where #replacing_ty: #iter_ty_lt))
                         } else {
                             quote!(#expr)
                         }
@@ -356,7 +309,6 @@ impl TraitTarget {
                             kind: generator::EmitIntoIterTy(replacing_ty.clone()),
                             krate: krate.clone(),
                             replacing_ty: replacing_ty.clone(),
-                            where_clause: Default::default(),
                         }
                         .emit_for_tys_exprs(
                             item.iter().map(|(a, _)| (a.clone(), replacing_ty.clone())),
@@ -371,7 +323,6 @@ impl TraitTarget {
                             kind: generator::EmitIntoIter,
                             krate: krate.clone(),
                             replacing_ty: replacing_ty.clone(),
-                            where_clause: Default::default(),
                         }
                         .emit_for_tys_exprs(item.iter().map(|(a, b)| (a.clone(), b.clone())))?
                         .unwrap_or(parse_quote!(::core::iter::empty())))
@@ -416,7 +367,6 @@ impl TraitTarget {
                                     kind: generator::EmitMap(map_fn.clone(), mapped_param.clone()),
                                     krate: krate.clone(),
                                     replacing_ty: replacing_ty.clone(),
-                                    where_clause: Default::default(),
                                 }
                                 .emit(a, &(b.clone(), a.clone()))?
                                 .map(|a| a.0)
