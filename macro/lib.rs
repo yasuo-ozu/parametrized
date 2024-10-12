@@ -195,9 +195,16 @@ impl TraitTarget {
                             krate: krate.clone(),
                             replacing_ty: replacing_ty.clone(),
                         }
-                        .emit_for_tys_exprs(
-                            item.iter().map(|(a, b)| (a.clone(), if needs_ref{parse_quote!(&#b)}else{parse_quote!(#b)})),
-                        )?
+                        .emit_for_tys_exprs(item.iter().map(|(a, b)| {
+                            (
+                                a.clone(),
+                                if needs_ref {
+                                    parse_quote!(&#b)
+                                } else {
+                                    parse_quote!(#b)
+                                },
+                            )
+                        }))?
                         .unwrap_or(parse_quote!(::core::iter::empty())))
                     })
                     .collect::<Result<Vec<_>>>()?
@@ -205,7 +212,16 @@ impl TraitTarget {
                     .zip(&out_iter_ty)
                     .map(|(expr, ty)| {
                         if tys_exprs.len() > 1 {
-                            quote!(sumtype!(#expr, for<#iter_ty_lt> #ty where #replacing_ty: #iter_ty_lt))
+                            quote!(sumtype!(
+                                #expr,
+                                for<#iter_ty_lt> #ty
+                                where
+                                    #(for tp in &generics.params) {
+                                        #(if let GenericParam::Type(tp) = tp) {
+                                            #{&tp.ident}: #iter_ty_lt,
+                                        }
+                                    }
+                            ))
                         } else {
                             quote!(#expr)
                         }
@@ -266,9 +282,16 @@ impl TraitTarget {
                             krate: krate.clone(),
                             replacing_ty: replacing_ty.clone(),
                         }
-                        .emit_for_tys_exprs(
-                            item.iter().map(|(a, b)| (a.clone(), if needs_ref{parse_quote!(&mut #b)}else{parse_quote!(#b)})),
-                        )?
+                        .emit_for_tys_exprs(item.iter().map(|(a, b)| {
+                            (
+                                a.clone(),
+                                if needs_ref {
+                                    parse_quote!(&mut #b)
+                                } else {
+                                    parse_quote!(#b)
+                                },
+                            )
+                        }))?
                         .unwrap_or(parse_quote!(::core::iter::empty())))
                     })
                     .collect::<Result<Vec<_>>>()?
@@ -276,7 +299,16 @@ impl TraitTarget {
                     .zip(&out_iter_mut_ty)
                     .map(|(expr, ty)| {
                         if tys_exprs.len() > 1 {
-                            quote!(sumtype!(#expr, for<#iter_ty_lt> #ty where #replacing_ty: #iter_ty_lt))
+                            quote!(sumtype!(
+                                #expr,
+                                for<#iter_ty_lt> #ty
+                                where
+                                    #(for tp in &generics.params) {
+                                        #(if let GenericParam::Type(tp) = tp) {
+                                            #{&tp.ident}: #iter_ty_lt,
+                                        }
+                                    }
+                            ))
                         } else {
                             quote!(#expr)
                         }
