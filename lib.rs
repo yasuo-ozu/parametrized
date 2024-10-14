@@ -971,5 +971,5 @@ impl<L: Hash + Eq, K: Hash + Eq, V> ParametrizedMap<1, L> for std::collections::
 
 #[doc(hidden)]
 pub mod _imp {
-    pub use sumtype::{sumtype, traits};
+    pub use sumtype;
 }

@@ -229,7 +229,7 @@ impl TraitTarget {
                     .collect::<Vec<_>>();
                 Ok(quote! {
                     #(if tys_exprs.len() > 1) {
-                        #[#krate::_imp::sumtype(#krate::_imp::traits::Iterator)]
+                        #[#krate::_imp::sumtype::sumtype(#krate::_imp::sumtype::traits::Iterator)]
                     }
                     impl #impl_generics #krate::Parametrized<#param_index> for #ident
                     #ty_generics #where_clause {
@@ -316,7 +316,7 @@ impl TraitTarget {
                     .collect::<Vec<_>>();
                 Ok(quote! {
                     #(if tys_exprs.len() > 1) {
-                        #[#krate::_imp::sumtype(#krate::_imp::traits::Iterator)]
+                        #[#krate::_imp::sumtype::sumtype(#krate::_imp::sumtype::traits::Iterator)]
                     }
                     impl #impl_generics #krate::ParametrizedIterMut<#param_index> for #ident #ty_generics #where_clause {
                         #(if tys_exprs.len() > 1) {
@@ -372,7 +372,7 @@ impl TraitTarget {
                     .collect::<Vec<_>>();
                 Ok(quote! {
                     #(if tys_exprs.len() > 1) {
-                        #[#krate::_imp::sumtype(#krate::_imp::traits::Iterator)]
+                        #[#krate::_imp::sumtype::sumtype(#krate::_imp::sumtype::traits::Iterator)]
                     }
                     impl #impl_generics #krate::ParametrizedIntoIter<#param_index> for #ident #ty_generics #where_clause {
                         #(if tys_exprs.len() > 1) {
@@ -730,6 +730,7 @@ fn inner(arg: Arguments, input: Item) -> TokenStream {
 
 #[proc_macro_error]
 #[proc_macro_attribute]
+#[proc_debug::proc_debug]
 pub fn parametrized(attr: TokenStream1, input: TokenStream1) -> TokenStream1 {
     inner(
         parse(attr).unwrap_or_else(|e| abort!(e.span(), &format!("{}", e))),
