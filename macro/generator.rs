@@ -547,18 +547,22 @@ impl Emitter for EmitContext<EmitIterMutTy> {
     type Elem = Type;
 
     fn item(&self, base_ty: &Type, index: usize, ty: &Type, expr: &Type) -> Result<Option<Type>> {
-        let lt = &self.kind.0;
-        fold_iter_ty_like(
-            self,
-            &self.kind.0,
-            base_ty,
-            index,
-            ty,
-            expr,
-            &quote!(ParametrizedIterMut),
-            &quote!(IterMut),
-            &quote!(&#lt mut),
-        )
+        if let Type::Tuple(_) = base_ty {
+            self.emit(ty, expr)
+        } else {
+            let lt = &self.kind.0;
+            fold_iter_ty_like(
+                self,
+                &self.kind.0,
+                base_ty,
+                index,
+                ty,
+                expr,
+                &quote!(ParametrizedIterMut),
+                &quote!(IterMut),
+                &quote!(&#lt mut),
+            )
+        }
     }
 
     fn fold(&self, acc: &Type, item: &Type) -> Type {
@@ -594,16 +598,39 @@ impl Emitter for EmitContext<EmitIterMut> {
     type Elem = Expr;
 
     fn item(&self, base_ty: &Type, index: usize, ty: &Type, expr: &Expr) -> Result<Option<Expr>> {
-        fold_iter_like(
-            self,
-            base_ty,
-            index,
-            ty,
-            expr,
-            &quote!(ParametrizedIterMut),
-            &quote!(param_iter_mut),
-            &quote!(& '__parametrized_lt mut),
-        )
+        if let Type::Tuple(_) = base_ty {
+            let expr = if let Expr::Reference(ExprReference {
+                mutability: Some(_),
+                expr,
+                ..
+            }) = expr
+            {
+                (**expr).clone()
+            } else {
+                expr.clone()
+            };
+            let new_expr = Expr::Field(ExprField {
+                attrs: vec![],
+                base: Box::new(expr.clone()),
+                dot_token: Default::default(),
+                member: Member::Unnamed(Index {
+                    index: index as u32,
+                    span: Span::call_site(),
+                }),
+            });
+            self.emit(ty, &parse_quote!(&mut #new_expr))
+        } else {
+            fold_iter_like(
+                self,
+                base_ty,
+                index,
+                ty,
+                expr,
+                &quote!(ParametrizedIterMut),
+                &quote!(param_iter_mut),
+                &quote!(& '__parametrized_lt mut),
+            )
+        }
     }
 
     fn fold(&self, acc: &Expr, item: &Expr) -> Expr {

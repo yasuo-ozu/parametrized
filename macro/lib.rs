@@ -730,7 +730,6 @@ fn inner(arg: Arguments, input: Item) -> TokenStream {
 
 #[proc_macro_error]
 #[proc_macro_attribute]
-#[proc_debug::proc_debug]
 pub fn parametrized(attr: TokenStream1, input: TokenStream1) -> TokenStream1 {
     inner(
         parse(attr).unwrap_or_else(|e| abort!(e.span(), &format!("{}", e))),
