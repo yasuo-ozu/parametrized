@@ -665,16 +665,18 @@ impl Emitter for EmitContext<EmitIntoIterTy> {
     type Elem = Type;
 
     fn item(&self, base_ty: &Type, index: usize, ty: &Type, expr: &Type) -> Result<Option<Type>> {
-        if let Some(inner) = self.emit(ty, expr)? {
+        if let Type::Tuple(_) = base_ty {
+            self.emit(ty, expr)
+        } else if let Some(inner) = self.emit(ty, expr)? {
             let krate = &self.krate;
             Ok(Some(parse_quote! {
                 #krate::Flatten<
-                    ::core::iter::Map<
-                        <#base_ty as #krate::ParametrizedIntoIter<#index>>::IntoIter,
-                        fn(#ty) -> #inner
-                    >,
-                    #inner
-                >
+                ::core::iter::Map<
+                    <#base_ty as #krate::ParametrizedIntoIter<#index>>::IntoIter,
+                    fn(#ty) -> #inner
+                        >,
+                        #inner
+                        >
             }))
         } else {
             Ok(None)
@@ -711,16 +713,39 @@ pub struct EmitIntoIter;
 impl Emitter for EmitContext<EmitIntoIter> {
     type Elem = Expr;
     fn item(&self, base_ty: &Type, index: usize, ty: &Type, expr: &Expr) -> Result<Option<Expr>> {
-        fold_iter_like(
-            self,
-            base_ty,
-            index,
-            ty,
-            expr,
-            &quote!(ParametrizedIntoIter),
-            &quote!(param_into_iter),
-            &quote!(),
-        )
+        if let Type::Tuple(_) = base_ty {
+            let expr = if let Expr::Reference(ExprReference {
+                mutability: Some(_),
+                expr,
+                ..
+            }) = expr
+            {
+                (**expr).clone()
+            } else {
+                expr.clone()
+            };
+            let new_expr = Expr::Field(ExprField {
+                attrs: vec![],
+                base: Box::new(expr.clone()),
+                dot_token: Default::default(),
+                member: Member::Unnamed(Index {
+                    index: index as u32,
+                    span: Span::call_site(),
+                }),
+            });
+            self.emit(ty, &new_expr)
+        } else {
+            fold_iter_like(
+                self,
+                base_ty,
+                index,
+                ty,
+                expr,
+                &quote!(ParametrizedIntoIter),
+                &quote!(param_into_iter),
+                &quote!(),
+            )
+        }
     }
 
     fn fold(&self, acc: &Expr, item: &Expr) -> Expr {
