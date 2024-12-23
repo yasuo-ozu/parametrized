@@ -101,16 +101,17 @@ where
         expr: &<Self as Emitter>::Elem,
     ) -> Result<Option<<Self as Emitter>::Elem>> {
         let base_expr = expr.clone();
-        Ok(tys.into_iter().fold(Ok(None), |acc, (index, ty)| {
-            self.fold_item(base_ty.clone(), &base_expr, ty, acc?, index)
-        })?)
+        tys.into_iter().try_fold(None, |acc, (index, ty)| {
+            self.fold_item(base_ty.clone(), &base_expr, ty, acc, index)
+        })
     }
-    pub fn emit_for_tys_exprs<'a>(
+
+    pub fn emit_for_tys_exprs(
         &self,
         tys_exprs: impl IntoIterator<Item = (Type, <Self as Emitter>::Elem)>,
     ) -> Result<Option<<Self as Emitter>::Elem>> {
-        tys_exprs.into_iter().fold(Ok(None), |acc, (ty, expr)| {
-            match (acc?, self.emit(&ty, &expr)?) {
+        tys_exprs.into_iter().try_fold(None, |acc, (ty, expr)| {
+            match (acc, self.emit(&ty, &expr)?) {
                 (Some(acc), Some(item)) => Ok(Some(self.fold(&acc, &item))),
                 (Some(o), None) | (None, Some(o)) => Ok(Some(o)),
                 _ => Ok(None),
@@ -151,11 +152,10 @@ where
                             expr,
                         ),
                         PathArguments::Parenthesized(parenthesized) => {
-                            if let Some(_) = self.emit_with_tys(
-                                ty,
-                                parenthesized.inputs.iter().enumerate(),
-                                expr,
-                            )? {
+                            if self
+                                .emit_with_tys(ty, parenthesized.inputs.iter().enumerate(), expr)?
+                                .is_some()
+                            {
                                 Err(Error::new(
                                     ty.span(),
                                     "Cannot infer Parametrized of closures",
@@ -189,19 +189,17 @@ where
             Type::Tuple(TypeTuple { elems, .. }) => {
                 self.emit_with_tys(ty, elems.iter().enumerate(), expr)
             }
-            Type::Never(_) => return Ok(None),
+            Type::Never(_) => Ok(None),
             Type::ImplTrait(TypeImplTrait { bounds, .. }) => {
-                if let Some(_) = self.emit_with_tys(
-                    ty,
-                    bounds
-                        .iter()
-                        .filter_map(|tpb| {
-                            if let TypeParamBound::Trait(tb) = tpb {
-                                Some(
-                                    tb.path
-                                        .segments
-                                        .iter()
-                                        .map(|seg| match &seg.arguments {
+                if self
+                    .emit_with_tys(
+                        ty,
+                        bounds
+                            .iter()
+                            .filter_map(|tpb| {
+                                if let TypeParamBound::Trait(tb) = tpb {
+                                    Some(tb.path.segments.iter().flat_map(|seg| {
+                                        match &seg.arguments {
                                             PathArguments::None => vec![],
                                             PathArguments::AngleBracketed(ab) => ab
                                                 .args
@@ -225,17 +223,18 @@ where
                                                     },
                                                 )
                                                 .collect(),
-                                        })
-                                        .flatten(),
-                                )
-                            } else {
-                                None
-                            }
-                        })
-                        .flatten()
-                        .enumerate(),
-                    expr,
-                )? {
+                                        }
+                                    }))
+                                } else {
+                                    None
+                                }
+                            })
+                            .flatten()
+                            .enumerate(),
+                        expr,
+                    )?
+                    .is_some()
+                {
                     Err(Error::new(ty.span(), "Cannot parametrize over impl trait"))
                 } else {
                     Ok(None)
@@ -344,6 +343,7 @@ impl Emitter for EmitContext<EmitMinLen> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn fold_iter_like<T>(
     ctx: &EmitContext<T>,
     base_ty: &Type,
@@ -419,6 +419,7 @@ impl Emitter for EmitContext<EmitLen> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn fold_iter_ty_like<T>(
     ctx: &EmitContext<T>,
     lt: &Lifetime,

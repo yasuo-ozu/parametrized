@@ -19,7 +19,7 @@ enum TraitTarget {
 }
 
 fn squash_minlens(outs: &[Expr]) -> Expr {
-    if outs.len() == 0 {
+    if outs.is_empty() {
         abort!(Span::call_site(), "needs one or more variants");
     }
     let mut acc = outs[outs.len() - 1].clone();
@@ -38,7 +38,7 @@ fn squash_minlens(outs: &[Expr]) -> Expr {
     }
 }
 fn squash_maxlens(outs: &[Expr]) -> Expr {
-    if outs.len() == 0 {
+    if outs.is_empty() {
         abort!(Span::call_site(), "needs one or more variants");
     }
     let mut acc = outs[outs.len() - 1].clone();
@@ -90,6 +90,7 @@ impl TraitTarget {
         set
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn emit(
         &self,
         krate: &Path,
@@ -502,7 +503,7 @@ impl Parse for Arguments {
                 for param_index in param_indices {
                     ret.trait_impls
                         .entry(param_index)
-                        .or_insert(HashSet::new())
+                        .or_default()
                         .insert(tr.clone());
                 }
             } else {

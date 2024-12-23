@@ -145,7 +145,7 @@ where
     }
 }
 
-impl<'a, const PARAM: usize, T> Parametrized<PARAM> for &'a T
+impl<const PARAM: usize, T> Parametrized<PARAM> for &T
 where
     T: Parametrized<PARAM>,
 {
@@ -155,7 +155,8 @@ where
     fn param_len(&self) -> usize {
         <T as Parametrized<PARAM>>::param_len(self)
     }
-    type Iter<'b> = <T as Parametrized<PARAM>>::Iter<'b>
+    type Iter<'b>
+        = <T as Parametrized<PARAM>>::Iter<'b>
     where
         (Self, Self::Item): 'b;
 
@@ -167,7 +168,7 @@ where
     }
 }
 
-impl<'a, const PARAM: usize, T> Parametrized<PARAM> for &'a mut T
+impl<const PARAM: usize, T> Parametrized<PARAM> for &mut T
 where
     T: Parametrized<PARAM>,
 {
@@ -177,7 +178,8 @@ where
     fn param_len(&self) -> usize {
         <T as Parametrized<PARAM>>::param_len(self)
     }
-    type Iter<'b> = <T as Parametrized<PARAM>>::Iter<'b>
+    type Iter<'b>
+        = <T as Parametrized<PARAM>>::Iter<'b>
     where
         (Self, Self::Item): 'b;
 
@@ -189,11 +191,12 @@ where
     }
 }
 
-impl<'a, const PARAM: usize, T> ParametrizedIterMut<PARAM> for &'a mut T
+impl<const PARAM: usize, T> ParametrizedIterMut<PARAM> for &mut T
 where
     T: ParametrizedIterMut<PARAM>,
 {
-    type IterMut<'b> = <T as ParametrizedIterMut<PARAM>>::IterMut<'b>
+    type IterMut<'b>
+        = <T as ParametrizedIterMut<PARAM>>::IterMut<'b>
     where
         (Self, Self::Item): 'b;
 
@@ -579,7 +582,8 @@ impl<const N: usize, T> ParametrizedIntoIter<0> for [T; N] {
     }
 }
 impl<const N: usize, T> ParametrizedIterMut<0> for [T; N] {
-    type IterMut<'a> = <&'a mut Self as IntoIterator>::IntoIter
+    type IterMut<'a>
+        = <&'a mut Self as IntoIterator>::IntoIter
     where
         (Self, Self::Item): 'a;
     fn param_iter_mut<'a>(&'a mut self) -> Self::IterMut<'a>
@@ -596,8 +600,10 @@ impl<const N: usize, T> Parametrized<0> for [T; N] {
     fn param_len(&self) -> usize {
         self.len()
     }
-    type Iter<'a> = <&'a Self as IntoIterator>::IntoIter
-    where (Self, Self::Item): 'a;
+    type Iter<'a>
+        = <&'a Self as IntoIterator>::IntoIter
+    where
+        (Self, Self::Item): 'a;
     fn param_iter<'a>(&'a self) -> Self::Iter<'a>
     where
         Self::Item: 'a,
@@ -613,7 +619,8 @@ impl<T> ParametrizedIntoIter<0> for Box<T> {
     }
 }
 impl<T> ParametrizedIterMut<0> for Box<T> {
-    type IterMut<'a> = core::iter::Once<&'a mut T>
+    type IterMut<'a>
+        = core::iter::Once<&'a mut T>
     where
         (Self, Self::Item): 'a;
     fn param_iter_mut<'a>(&'a mut self) -> Self::IterMut<'a>
@@ -630,8 +637,10 @@ impl<T> Parametrized<0> for Box<T> {
     fn param_len(&self) -> usize {
         1
     }
-    type Iter<'a> = core::iter::Once<&'a T>
-    where (Self, Self::Item): 'a;
+    type Iter<'a>
+        = core::iter::Once<&'a T>
+    where
+        (Self, Self::Item): 'a;
     fn param_iter<'a>(&'a self) -> Self::Iter<'a>
     where
         Self::Item: 'a,
@@ -676,7 +685,10 @@ impl<T, E> Parametrized<0> for Result<T, E> {
     fn param_len(&self) -> usize {
         self.is_ok() as usize
     }
-    type Iter<'a> = std::result::Iter<'a, T> where (T,E):'a;
+    type Iter<'a>
+        = std::result::Iter<'a, T>
+    where
+        (T, E): 'a;
     fn param_iter<'a>(&'a self) -> Self::Iter<'a>
     where
         Self::Item: 'a,
@@ -685,7 +697,8 @@ impl<T, E> Parametrized<0> for Result<T, E> {
     }
 }
 impl<T, E> ParametrizedIterMut<0> for Result<T, E> {
-    type IterMut<'a> = std::result::IterMut<'a,T>
+    type IterMut<'a>
+        = std::result::IterMut<'a, T>
     where
         (Self, Self::Item): 'a;
 
@@ -697,7 +710,8 @@ impl<T, E> ParametrizedIterMut<0> for Result<T, E> {
     }
 }
 impl<T, E> ParametrizedIntoIter<0> for Result<T, E> {
-    type IntoIter = std::result::IntoIter<T>
+    type IntoIter
+        = std::result::IntoIter<T>
     where
         Self::Item: Sized;
 
@@ -726,7 +740,10 @@ impl<T, E> Parametrized<1> for Result<T, E> {
     fn param_len(&self) -> usize {
         self.is_err() as usize
     }
-    type Iter<'a> = std::option::IntoIter<&'a E> where (T, E): 'a;
+    type Iter<'a>
+        = std::option::IntoIter<&'a E>
+    where
+        (T, E): 'a;
 
     fn param_iter<'a>(&'a self) -> Self::Iter<'a>
     where
@@ -736,7 +753,10 @@ impl<T, E> Parametrized<1> for Result<T, E> {
     }
 }
 impl<T, E> ParametrizedIterMut<1> for Result<T, E> {
-    type IterMut<'a> = std::option::IntoIter<&'a mut E> where (T,E):'a;
+    type IterMut<'a>
+        = std::option::IntoIter<&'a mut E>
+    where
+        (T, E): 'a;
 
     fn param_iter_mut<'a>(&'a mut self) -> Self::IterMut<'a>
     where
@@ -774,7 +794,10 @@ impl<const N: usize, T, M> ParametrizedMap<0, M> for [T; N] {
     }
 }
 impl<T> ParametrizedIterMut<0> for [T] {
-    type IterMut<'a> = std::slice::IterMut<'a, T> where T: 'a;
+    type IterMut<'a>
+        = std::slice::IterMut<'a, T>
+    where
+        T: 'a;
     fn param_iter_mut<'a>(&'a mut self) -> Self::IterMut<'a>
     where
         T: 'a,
@@ -789,7 +812,10 @@ impl<T> Parametrized<0> for [T] {
     fn param_len(&self) -> usize {
         self.len()
     }
-    type Iter<'a> = std::slice::Iter<'a, T> where T: 'a;
+    type Iter<'a>
+        = std::slice::Iter<'a, T>
+    where
+        T: 'a;
     fn param_iter<'a>(&'a self) -> Self::Iter<'a>
     where
         Self::Item: 'a,
@@ -804,7 +830,10 @@ impl<T> ParametrizedIntoIter<0> for Option<T> {
     }
 }
 impl<T> ParametrizedIterMut<0> for Option<T> {
-    type IterMut<'a> = core::option::IterMut<'a,T> where T:'a;
+    type IterMut<'a>
+        = core::option::IterMut<'a, T>
+    where
+        T: 'a;
     fn param_iter_mut<'a>(&'a mut self) -> Self::IterMut<'a>
     where
         T: 'a,
@@ -819,7 +848,10 @@ impl<T> Parametrized<0> for Option<T> {
     fn param_len(&self) -> usize {
         self.is_some() as usize
     }
-    type Iter<'a> = core::option::Iter<'a,T> where T:'a;
+    type Iter<'a>
+        = core::option::Iter<'a, T>
+    where
+        T: 'a;
     fn param_iter<'a>(&'a self) -> Self::Iter<'a>
     where
         Self::Item: 'a,
@@ -835,7 +867,10 @@ impl<K, V> Parametrized<0> for std::collections::BTreeMap<K, V> {
     fn param_len(&self) -> usize {
         self.len()
     }
-    type Iter<'a> = std::collections::btree_map::Keys<'a, K, V> where (K, V): 'a;
+    type Iter<'a>
+        = std::collections::btree_map::Keys<'a, K, V>
+    where
+        (K, V): 'a;
     fn param_iter<'a>(&'a self) -> Self::Iter<'a>
     where
         Self::Item: 'a,
@@ -866,7 +901,10 @@ impl<K, V> Parametrized<1> for std::collections::BTreeMap<K, V> {
     fn param_len(&self) -> usize {
         self.len()
     }
-    type Iter<'a> = std::collections::btree_map::Values<'a, K, V> where (K, V): 'a;
+    type Iter<'a>
+        = std::collections::btree_map::Values<'a, K, V>
+    where
+        (K, V): 'a;
     fn param_iter<'a>(&'a self) -> Self::Iter<'a>
     where
         (K, V): 'a,
@@ -875,7 +913,10 @@ impl<K, V> Parametrized<1> for std::collections::BTreeMap<K, V> {
     }
 }
 impl<K, V> ParametrizedIterMut<1> for std::collections::BTreeMap<K, V> {
-    type IterMut<'a> = std::collections::btree_map::ValuesMut<'a, K, V> where (K, V): 'a;
+    type IterMut<'a>
+        = std::collections::btree_map::ValuesMut<'a, K, V>
+    where
+        (K, V): 'a;
     fn param_iter_mut<'a>(&'a mut self) -> Self::IterMut<'a>
     where
         (K, V): 'a,
@@ -905,7 +946,10 @@ impl<K, V> Parametrized<0> for std::collections::HashMap<K, V> {
     fn param_len(&self) -> usize {
         self.len()
     }
-    type Iter<'a> = std::collections::hash_map::Keys<'a, K, V> where (K, V): 'a;
+    type Iter<'a>
+        = std::collections::hash_map::Keys<'a, K, V>
+    where
+        (K, V): 'a;
     fn param_iter<'a>(&'a self) -> Self::Iter<'a>
     where
         Self::Item: 'a,
@@ -936,7 +980,10 @@ impl<K, V> Parametrized<1> for std::collections::HashMap<K, V> {
     fn param_len(&self) -> usize {
         self.len()
     }
-    type Iter<'a> = std::collections::hash_map::Values<'a, K, V> where (K, V): 'a;
+    type Iter<'a>
+        = std::collections::hash_map::Values<'a, K, V>
+    where
+        (K, V): 'a;
     fn param_iter<'a>(&'a self) -> Self::Iter<'a>
     where
         (K, V): 'a,
@@ -945,7 +992,10 @@ impl<K, V> Parametrized<1> for std::collections::HashMap<K, V> {
     }
 }
 impl<K, V> ParametrizedIterMut<1> for std::collections::HashMap<K, V> {
-    type IterMut<'a> = std::collections::hash_map::ValuesMut<'a, K, V> where (K, V): 'a;
+    type IterMut<'a>
+        = std::collections::hash_map::ValuesMut<'a, K, V>
+    where
+        (K, V): 'a;
     fn param_iter_mut<'a>(&'a mut self) -> Self::IterMut<'a>
     where
         (K, V): 'a,
